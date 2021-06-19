@@ -82,16 +82,17 @@ func (im *indexMap) Range(f func(k string, v *sidSet)) {
 	}
 }
 
-func (im *indexMap) BuildFromDisk(m map[string][]int32) {
-	im.mut.Lock()
-	defer im.mut.Unlock()
+func buildIndexMapForDisk(m map[string][]uint32) *indexMap {
+	idxmap := &indexMap{idx: map[string]*sidSet{}}
 
 	for k, sids := range m {
-		im.idx[k] = newSidSet()
+		idxmap.idx[k] = newSidSet()
 		for _, sid := range sids {
-			im.idx[k].Add(strconv.Itoa(int(sid)))
+			idxmap.idx[k].Add(strconv.Itoa(int(sid)))
 		}
 	}
+
+	return idxmap
 }
 
 func (im *indexMap) UpdateIndex(sid string, labels LabelSet) {

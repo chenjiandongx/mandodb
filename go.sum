@@ -6,3 +6,5 @@ github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe h1:VOrqop9SqFzqwZpR
 github.com/dgryski/go-tsz v0.0.0-20180227144327-03b7d791f4fe/go.mod h1:ft6P746mYUFQBCsH3OkFBG8FtjLx1XclLMo+9Jh1Yts=
 github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72 h1:qLC7fQah7D6K1B0ujays3HV9gkFtllcxhzImRR7ArPQ=
 github.com/spaolacci/murmur3 v0.0.0-20180118202830-f09979ecbc72/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
+golang.org/x/sys v0.0.0-20210616094352-59db8d763f22 h1:RqytpXGR1iVNX7psjB3ff8y7sNFinVFvkx1c8SjBkio=
+golang.org/x/sys v0.0.0-20210616094352-59db8d763f22/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=

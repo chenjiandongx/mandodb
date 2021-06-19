@@ -1,15 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"github.com/chenjiandongx/mandodb/storage"
 	"time"
 )
 
 func main() {
-	store := storage.NewMemorySegment()
+	store := storage.OpenTSDB()
 
 	now := time.Now().Unix()
-	for i := 1; i <= 121; i++ {
+
+
+	for i := 1; i <= 250; i++ {
 		store.InsertRow(&storage.Row{
 			Metric:    "cpu.busy",
 			Labels:    []storage.Label{{"core", "1"}},
@@ -18,6 +21,6 @@ func main() {
 		now += 5
 	}
 
-	store.QueryRange("my-metric10", []storage.Label{{"a", "1"}}, 0, 100)
-	//store.QueryRange("my-metric11", []Label{{"a", "2"}}, 0, 100)
+	fmt.Println(now-(5*160), now-(5*150))
+	store.QueryRange("cpu.busy", []storage.Label{{"a", "1"}}, now-(5*160), now-(5*150))
 }

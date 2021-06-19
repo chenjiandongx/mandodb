@@ -2,7 +2,6 @@ package storage
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -19,10 +18,10 @@ type memorySegment struct {
 	metaSerializer MetaSerializer
 }
 
-func NewMemorySegment() Segment {
+func newMemorySegment() Segment {
 	segment := &memorySegment{
 		metricIdx:      newIndexMap(),
-		metaSerializer: &binaryMetaSerializer{},
+		metaSerializer: &jsonMetaSerializer{},
 	}
 
 	return segment
@@ -52,7 +51,14 @@ func (ms *memorySegment) Frozen() bool {
 	return ms.MaxTs()-ms.MinTs() >= 600
 }
 
-// TODO: 并发安全
+func (ms *memorySegment) Unmarshal(bs []byte, metadata *Metadata) error {
+	return ms.metaSerializer.Unmarshal(bs, metadata)
+}
+
+func (ms *memorySegment) Type() SegmentType {
+	return MemorySegmentType
+}
+
 func (ms *memorySegment) InsertRow(row *Row) {
 	row.Labels = row.Labels.AddMetricName(row.Metric)
 	series := ms.getOrCreateSeries(row)
@@ -67,22 +73,9 @@ func (ms *memorySegment) InsertRow(row *Row) {
 		atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
 	}
 	ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
-
-	// 落盘
-	if ms.Frozen() {
-		// segment-mints-maxts
-		prefix := fmt.Sprintf("segment-%d-%d-", ms.MinTs(), ms.MaxTs())
-		if err := ms.flushToDisk(prefix+"meta", prefix+"data"); err != nil {
-			panic(err)
-		}
-
-		// 构建 disksegment 索引
-	}
 }
 
-func (ms *memorySegment) QueryRange(metric string, labels LabelSet, start, end int64) {
-	labels = labels.AddMetricName(metric)
-
+func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) {
 	for _, sid := range ms.metricIdx.MatchSids(labels) {
 		b, _ := ms.segment.Load(sid)
 		series := b.(*Series)
@@ -92,42 +85,7 @@ func (ms *memorySegment) QueryRange(metric string, labels LabelSet, start, end i
 	}
 }
 
-func (ms *memorySegment) flushToDisk(metaFile, dataFile string) error {
-	metaBytes, dataBytes, err := ms.marshal()
-	if err != nil {
-		return fmt.Errorf("failed to marshal segment: %s", err.Error())
-	}
-
-	if isFileExist(metaFile) {
-		return fmt.Errorf("%s metafile is exist", metaFile)
-	}
-	metaFd, err := os.OpenFile(metaFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
-		return err
-	}
-
-	metaFd.Write(metaBytes)
-	defer metaFd.Close()
-
-	if isFileExist(dataFile) {
-		return fmt.Errorf("%s datafile is exist", dataFile)
-	}
-	dataFd, err := os.OpenFile(dataFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
-		return err
-	}
-
-	dataFd.Write(dataBytes)
-	defer dataFd.Close()
-
-	mm := Metadata{}
-	ms.metaSerializer.Unmarshal(metaBytes, &mm)
-	fmt.Printf("%+v\n", mm)
-
-	return nil
-}
-
-func (ms *memorySegment) marshal() ([]byte, []byte, error) {
+func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	sids := make(map[string]uint32)
 	dataBytes := make([]byte, 0)
 
@@ -155,7 +113,6 @@ func (ms *memorySegment) marshal() ([]byte, []byte, error) {
 	})
 
 	labelIdx := make(map[string][]uint32)
-
 	ms.metricIdx.Range(func(k string, v *sidSet) {
 		l := make([]uint32, 0)
 		for _, s := range v.List() {
@@ -164,12 +121,13 @@ func (ms *memorySegment) marshal() ([]byte, []byte, error) {
 
 		sort.Slice(l, func(i, j int) bool { return l[i] < l[j] })
 		labelIdx[k] = l
-		meta.Labels = labelIdx
 	})
+	meta.Labels = labelIdx
 
 	metaBytes, err := ms.metaSerializer.Marshal(meta)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	return metaBytes, dataBytes, nil
 }
