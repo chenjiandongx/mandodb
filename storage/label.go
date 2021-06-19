@@ -2,9 +2,14 @@ package storage
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cespare/xxhash"
+)
+
+const (
+	labelSep = ":/:"
 )
 
 var labelBufPool = sync.Pool{
@@ -65,4 +70,27 @@ func (ls LabelSet) Hash() uint64 {
 	labelBufPool.Put(b) // reuse bytes buffer
 
 	return h
+}
+
+func (ls LabelSet) Bytes() []byte {
+	bs := make([]byte, 0)
+	for _, label := range ls {
+		bs = append(bs, label.Name+"="+label.Value+labelSep...)
+	}
+
+	return bs
+}
+
+func labelBytesTo(bs []byte) []Label {
+	ret := make([]Label, 0)
+	for _, label := range strings.Split(string(bs), labelSep) {
+		pair := strings.SplitN(label, "=", 2)
+		if len(pair) < 2 {
+			continue
+		}
+
+		ret = append(ret, Label{Name: pair[0], Value: pair[1]})
+	}
+
+	return ret
 }

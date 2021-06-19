@@ -14,7 +14,7 @@ const (
 
 type Segment interface {
 	InsertRow(row *Row)
-	QueryRange(labels LabelSet, start, end int64)
+	QueryRange(labels LabelSet, start, end int64) []MetricRet
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
@@ -82,10 +82,6 @@ func (sl *SegmentList) Add(segment Segment) {
 
 func (sl *SegmentList) Remove(segment Segment) {
 
-}
-
-func (sl *SegmentList) Head() Segment {
-	return sl.head
 }
 
 const metricName = "__name__"

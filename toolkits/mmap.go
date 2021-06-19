@@ -1,4 +1,4 @@
-package storage
+package toolkits
 
 import (
 	"errors"
@@ -7,12 +7,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type mmapFile struct {
+type MmapFile struct {
 	f *os.File
 	b []byte
 }
 
-func openMmapFile(path string) (mf *mmapFile, retErr error) {
+func OpenMmapFile(path string) (mf *MmapFile, retErr error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.New("try lock file")
@@ -36,10 +36,10 @@ func openMmapFile(path string) (mf *mmapFile, retErr error) {
 		return nil, errors.New("mmap")
 	}
 
-	return &mmapFile{f: f, b: b}, nil
+	return &MmapFile{f: f, b: b}, nil
 }
 
-func (f *mmapFile) Close() error {
+func (f *MmapFile) Close() error {
 	err0 := syscallMunmap(f.b)
 	err1 := f.f.Close()
 
@@ -49,11 +49,11 @@ func (f *mmapFile) Close() error {
 	return err1
 }
 
-func (f *mmapFile) File() *os.File {
+func (f *MmapFile) File() *os.File {
 	return f.f
 }
 
-func (f *mmapFile) Bytes() []byte {
+func (f *MmapFile) Bytes() []byte {
 	return f.b
 }
 

@@ -1,15 +1,17 @@
 package storage
 
 import (
-	"fmt"
+	"bytes"
 	"sort"
 	"strconv"
 
 	"github.com/dgryski/go-tsz"
+
+	"github.com/chenjiandongx/mandodb/toolkits"
 )
 
 type diskSegment struct {
-	mf        *mmapFile
+	mf        *toolkits.MmapFile
 	metricIdx *indexMap
 	series    []metaSeries
 
@@ -17,7 +19,7 @@ type diskSegment struct {
 	maxTs int64
 }
 
-func newDiskSegment(mf *mmapFile, meta *Metadata, minTs, maxTs int64) Segment {
+func newDiskSegment(mf *toolkits.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
 	return &diskSegment{
 		mf:        mf,
 		series:    meta.Series,
@@ -55,39 +57,51 @@ func (ds *diskSegment) InsertRow(_ *Row) {
 	panic("mandodb: disk segments are not mutable")
 }
 
-func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) {
+func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) []MetricRet {
 	sids := make([]int, 0)
-
 	for _, sid := range ds.metricIdx.MatchSids(labels) {
 		i, _ := strconv.Atoi(sid)
 		sids = append(sids, i)
 	}
-
 	sort.Ints(sids)
+
+	ret := make([]MetricRet, 0)
 	for _, sid := range sids {
-		so := ds.series[sid].StartOffset
-		eo := ds.series[sid].EndOffset
+		startOffset := ds.series[sid].StartOffset
+		endOffset := ds.series[sid].EndOffset
+		labelLen := ds.series[sid].LabelLen
 
-		_ = sid
+		reader := bytes.NewReader(ds.mf.Bytes())
 
-		bs := ds.mf.Bytes()
-
-		bs1 := make([]byte, 1024)
-		copy(bs1, bs)
-		iter, err := tsz.NewIterator(bs1[so:eo])
+		labelBytes := make([]byte, labelLen)
+		_, err := reader.ReadAt(labelBytes, int64(startOffset))
 		if err != nil {
 			panic(err)
 		}
 
-		_ = iter
+		dataBytes := make([]byte, endOffset-(startOffset+labelLen))
+		_, err = reader.ReadAt(dataBytes, int64(startOffset+labelLen))
+		if err != nil {
+			panic(err)
+		}
 
+		iter, err := tsz.NewIterator(dataBytes)
+		if err != nil {
+			panic(err)
+		}
+
+		dps := make([]DataPoint, 0)
 		for iter.Next() {
 			ts, val := iter.Values()
-
 			if ts >= uint32(start) && ts <= uint32(end) {
-				fmt.Println(ts, val)
-				//panic(err)
+				dps = append(dps, DataPoint{Ts: int64(ts), Value: val})
 			}
 		}
+		ret = append(ret, MetricRet{
+			DataPoints: dps,
+			Labels:     labelBytesTo(labelBytes),
+		})
 	}
+
+	return ret
 }

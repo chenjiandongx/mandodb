@@ -13,6 +13,7 @@ const (
 
 type metaSeries struct {
 	Sid         string `json:"sid"`
+	LabelLen    uint64 `json:"labelLen"`
 	StartOffset uint64 `json:"startOffset"`
 	EndOffset   uint64 `json:"endOffset"`
 }
@@ -60,7 +61,7 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	for _, series := range meta.Series {
 		encoder.PutUint16(uint16(len(series.Sid)))
 		encoder.PutString(series.Sid)
-		encoder.PutUint64(series.StartOffset, series.EndOffset)
+		encoder.PutUint64(series.LabelLen, series.StartOffset, series.EndOffset)
 	}
 	encoder.PutUint16(endOfBlock)
 
@@ -91,6 +92,9 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 		series.Sid = decoder.String(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
+
+		series.LabelLen = decoder.Uint64(data[offset : offset+uint64Size])
+		offset += uint64Size
 
 		series.StartOffset = decoder.Uint64(data[offset : offset+uint64Size])
 		offset += uint64Size

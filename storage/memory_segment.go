@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -21,7 +20,7 @@ type memorySegment struct {
 func newMemorySegment() Segment {
 	segment := &memorySegment{
 		metricIdx:      newIndexMap(),
-		metaSerializer: &jsonMetaSerializer{},
+		metaSerializer: &binaryMetaSerializer{},
 	}
 
 	return segment
@@ -75,35 +74,46 @@ func (ms *memorySegment) InsertRow(row *Row) {
 	ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
 }
 
-func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) {
+func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) []MetricRet {
+	ret := make([]MetricRet, 0)
 	for _, sid := range ms.metricIdx.MatchSids(labels) {
 		b, _ := ms.segment.Load(sid)
 		series := b.(*Series)
-		fmt.Printf("%+v\n", series.labels)
-		fmt.Printf("%+v\n", series.store.Get(start, end))
-		fmt.Println()
+		ret = append(ret, MetricRet{
+			Labels:     series.labels,
+			DataPoints: series.store.Get(start, end),
+		})
 	}
+
+	return ret
 }
 
 func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	sids := make(map[string]uint32)
-	dataBytes := make([]byte, 0)
 
 	startOffset := 0
 	size := 0
 
+	dataBuf := make([]byte, 0)
 	meta := Metadata{}
+
 	ms.segment.Range(func(key, value interface{}) bool {
 		sid := key.(string)
 		sids[sid] = uint32(size)
 		size++
 
-		bs := value.(*Series).store.Bytes()
-		dataBytes = append(dataBytes, bs...)
+		series := value.(*Series)
 
-		endOffset := startOffset + len(bs)
+		labelBytes := series.labels.Bytes()
+		dataBuf = append(dataBuf, labelBytes...)
+
+		dataBytes := series.store.Bytes()
+		dataBuf = append(dataBuf, dataBytes...)
+
+		endOffset := startOffset + len(labelBytes) + len(dataBytes)
 		meta.Series = append(meta.Series, metaSeries{
 			Sid:         key.(string),
+			LabelLen:    uint64(len(labelBytes)),
 			StartOffset: uint64(startOffset),
 			EndOffset:   uint64(endOffset),
 		})
@@ -129,5 +139,5 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return metaBytes, dataBytes, nil
+	return metaBytes, dataBuf, nil
 }

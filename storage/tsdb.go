@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/chenjiandongx/mandodb/toolkits"
 )
 
 // TODO: list
@@ -32,6 +34,11 @@ func (r Row) ID() string {
 	return joinSeparator(r.Metric, r.Labels.Hash())
 }
 
+type MetricRet struct {
+	Labels     []Label
+	DataPoints []DataPoint
+}
+
 type TSDB struct {
 	segs *SegmentList
 	mut  sync.Mutex
@@ -39,22 +46,21 @@ type TSDB struct {
 
 func (tsdb *TSDB) InsertRow(row *Row) error {
 	tsdb.mut.Lock()
-	if tsdb.segs.Head().Frozen() {
-		prefix := fmt.Sprintf("segment-%d-%d.", tsdb.segs.Head().MinTs(), tsdb.segs.Head().MaxTs())
-		meta, err := tsdb.flushToDisk(tsdb.segs.Head())
+	if tsdb.segs.head.Frozen() {
+		prefix := fmt.Sprintf("segment-%d-%d.", tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs())
+		meta, err := tsdb.flushToDisk(tsdb.segs.head)
 		if err != nil {
 			return fmt.Errorf("failed to flush data to disk, %v", err)
 		}
 
-		mf, err := openMmapFile(prefix + "data")
+		mf, err := toolkits.OpenMmapFile(prefix + "data")
 		if err != nil {
 			return fmt.Errorf("failed to make a mmap file, %v", err)
 		}
 
-		tsdb.segs.Add(newDiskSegment(mf, meta, tsdb.segs.Head().MinTs(), tsdb.segs.Head().MaxTs()))
+		tsdb.segs.Add(newDiskSegment(mf, meta, tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs()))
 
 		newseg := newMemorySegment()
-		tsdb.segs.Add(newseg)
 		tsdb.segs.head = newseg
 	}
 	tsdb.mut.Unlock()
@@ -64,11 +70,12 @@ func (tsdb *TSDB) InsertRow(row *Row) error {
 }
 
 func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) {
-	labels = append(labels, Label{Name: metricName, Value: metric})
+	labels = labels.AddMetricName(metric)
 
 	ret := tsdb.segs.Get(start, end)
 	for _, r := range ret {
-		r.QueryRange(labels, start, end)
+		fmt.Println("Query from:", r.Type())
+		fmt.Printf("%+v\n", r.QueryRange(labels, start, end))
 	}
 }
 

@@ -45,6 +45,10 @@ func (e *encbuf) PutString(s string) {
 	e.B = append(e.B, s...)
 }
 
+func (e *encbuf) PutBytes(b []byte) {
+	e.B = append(e.B, b...)
+}
+
 var (
 	ErrInvalidSize = errors.New("invalid size")
 )
