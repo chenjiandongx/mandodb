@@ -7,11 +7,11 @@ import (
 
 	"github.com/dgryski/go-tsz"
 
-	"github.com/chenjiandongx/mandodb/toolkits"
+	"github.com/chenjiandongx/mandodb/toolkit/mmap"
 )
 
 type diskSegment struct {
-	mf        *toolkits.MmapFile
+	mf        *mmap.MmapFile
 	metricIdx *indexMap
 	series    []metaSeries
 
@@ -19,7 +19,7 @@ type diskSegment struct {
 	maxTs int64
 }
 
-func newDiskSegment(mf *toolkits.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
+func newDiskSegment(mf *mmap.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
 	return &diskSegment{
 		mf:        mf,
 		series:    meta.Series,
@@ -41,6 +41,7 @@ func (ds *diskSegment) Frozen() bool {
 	return true
 }
 
+// TODO: 初始化时直接从磁盘读取
 func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
 	return nil, nil, nil
 }
@@ -93,10 +94,15 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) []MetricRet
 		dps := make([]DataPoint, 0)
 		for iter.Next() {
 			ts, val := iter.Values()
+			if ts > uint32(end) {
+				break
+			}
+
 			if ts >= uint32(start) && ts <= uint32(end) {
 				dps = append(dps, DataPoint{Ts: int64(ts), Value: val})
 			}
 		}
+
 		ret = append(ret, MetricRet{
 			DataPoints: dps,
 			Labels:     labelBytesTo(labelBytes),

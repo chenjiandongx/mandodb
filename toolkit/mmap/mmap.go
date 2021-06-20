@@ -1,4 +1,4 @@
-package toolkits
+package mmap
 
 import (
 	"errors"

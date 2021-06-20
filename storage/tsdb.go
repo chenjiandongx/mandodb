@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/chenjiandongx/mandodb/toolkits"
+	"github.com/chenjiandongx/mandodb/toolkit/mmap"
 )
 
 // TODO: list
@@ -53,7 +53,7 @@ func (tsdb *TSDB) InsertRow(row *Row) error {
 			return fmt.Errorf("failed to flush data to disk, %v", err)
 		}
 
-		mf, err := toolkits.OpenMmapFile(prefix + "data")
+		mf, err := mmap.OpenMmapFile(prefix + "data")
 		if err != nil {
 			return fmt.Errorf("failed to make a mmap file, %v", err)
 		}
@@ -77,6 +77,10 @@ func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) {
 		fmt.Println("Query from:", r.Type())
 		fmt.Printf("%+v\n", r.QueryRange(labels, start, end))
 	}
+}
+
+func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
+	return nil
 }
 
 func (tsdb *TSDB) flushToDisk(segment Segment) (*Metadata, error) {
