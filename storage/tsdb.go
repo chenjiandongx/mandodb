@@ -50,12 +50,10 @@ type TSDB struct {
 	mut  sync.Mutex
 }
 
-func (tsdb *TSDB) InsertRow(row *Row) error {
+func (tsdb *TSDB) InsertRows(rows []*Row) error {
 	// 加锁确保 head 的状态对外都是一致的
 	// TODO: 这个锁对性能影响太大了 得想办法优化
 	tsdb.mut.Lock()
-	defer tsdb.mut.Unlock()
-
 	if tsdb.segs.head.Frozen() {
 		prefix := filePrefix(tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs())
 		meta, err := writeToDisk(tsdb.segs.head)
@@ -71,7 +69,9 @@ func (tsdb *TSDB) InsertRow(row *Row) error {
 		tsdb.segs.Add(newDiskSegment(mf, meta, tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs()))
 		tsdb.segs.head = newMemorySegment()
 	}
-	tsdb.segs.head.InsertRow(row)
+	tsdb.mut.Unlock()
+
+	tsdb.segs.head.InsertRows(rows)
 	return nil
 }
 
@@ -124,6 +124,7 @@ func (tsdb *TSDB) loadFiles() {
 				panic(err)
 			}
 
+			// TODO: 这里需要校验数据的合法性 CRC32...
 			meta := Metadata{}
 			UnmarshalMeta(bs, &meta)
 

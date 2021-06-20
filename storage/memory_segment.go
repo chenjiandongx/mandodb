@@ -58,24 +58,26 @@ func (ms *memorySegment) Close() error {
 	return err
 }
 
-func (ms *memorySegment) InsertRow(row *Row) {
-	row.Labels = row.Labels.AddMetricName(row.Metric)
-	series := ms.getOrCreateSeries(row)
+func (ms *memorySegment) InsertRows(rows []*Row) {
+	for _, row := range rows {
+		row.Labels = row.Labels.AddMetricName(row.Metric)
+		series := ms.getOrCreateSeries(row)
 
-	outdated := series.store.Append(&row.DataPoint)
+		outdated := series.store.Append(&row.DataPoint)
 
-	// TODO: 处理乱序数据
-	_ = outdated
+		// TODO: 处理乱序数据
+		_ = outdated
 
-	ms.once.Do(func() {
-		ms.minTs = row.DataPoint.Ts
-		ms.maxTs = row.DataPoint.Ts
-	})
+		ms.once.Do(func() {
+			ms.minTs = row.DataPoint.Ts
+			ms.maxTs = row.DataPoint.Ts
+		})
 
-	if atomic.LoadInt64(&ms.maxTs) < row.DataPoint.Ts {
-		atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
+		if atomic.LoadInt64(&ms.maxTs) < row.DataPoint.Ts {
+			atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
+		}
+		ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
 	}
-	ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
 }
 
 func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {

@@ -53,7 +53,7 @@ func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
 	return nil, nil, nil
 }
 
-func (ds *diskSegment) InsertRow(_ *Row) {
+func (ds *diskSegment) InsertRows(_ []*Row) {
 	panic("mandodb: disk segments are not mutable")
 }
 

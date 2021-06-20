@@ -13,7 +13,7 @@ const (
 )
 
 type Segment interface {
-	InsertRow(row *Row)
+	InsertRows(row []*Row)
 	QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error)
 	MinTs() int64
 	MaxTs() int64
