@@ -126,7 +126,9 @@ func (tsdb *TSDB) loadFiles() {
 
 			// TODO: 这里需要校验数据的合法性 CRC32...
 			meta := Metadata{}
-			UnmarshalMeta(bs, &meta)
+			if err := UnmarshalMeta(bs, &meta); err != nil {
+				continue
+			}
 
 			datafname := strings.ReplaceAll(file.Name(), ".meta", ".data")
 			fmt.Println("datafname:", datafname)
