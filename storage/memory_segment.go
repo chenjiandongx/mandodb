@@ -54,6 +54,11 @@ func (ms *memorySegment) Type() SegmentType {
 }
 
 func (ms *memorySegment) Close() error {
+	// 内存无数据就不持久化到磁盘了
+	if ms.MinTs() == 0 && ms.MaxTs() == 0 {
+		return nil
+	}
+
 	_, err := writeToDisk(ms)
 	return err
 }

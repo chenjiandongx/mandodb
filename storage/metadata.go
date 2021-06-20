@@ -61,6 +61,8 @@ const (
 	uint16Size        = 2
 	uint32Size        = 4
 	uint64Size        = 8
+
+	magic = "https://github.com/chenjiandongx/mandodb"
 )
 
 func newBinaryMetaSerializer() MetaSerializer {
@@ -68,52 +70,62 @@ func newBinaryMetaSerializer() MetaSerializer {
 }
 
 func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
-	encoder := newEncbuf()
+	encf := newEncbuf()
 
 	for _, series := range meta.Series {
-		encoder.PutUint16(uint16(len(series.Sid)))
-		encoder.PutString(series.Sid)
-		encoder.PutUint64(series.LabelLen, series.StartOffset, series.EndOffset)
+		encf.PutUint16(uint16(len(series.Sid)))
+		encf.PutString(series.Sid)
+		encf.PutUint64(series.LabelLen, series.StartOffset, series.EndOffset)
 	}
-	encoder.PutUint16(endOfBlock)
+	encf.PutUint16(endOfBlock)
 
 	for name, sids := range meta.Labels {
-		encoder.PutUint16(uint16(len(name)))
-		encoder.PutString(name)
-		encoder.PutUint32(uint32(len(sids)))
-		encoder.PutUint32(sids...)
+		encf.PutUint16(uint16(len(name)))
+		encf.PutString(name)
+		encf.PutUint32(uint32(len(sids)))
+		encf.PutUint32(sids...)
 	}
-	encoder.PutUint16(endOfBlock)
-	encoder.PutUint64(uint64(meta.MinTs))
-	encoder.PutUint64(uint64(meta.MaxTs))
+	encf.PutUint16(endOfBlock)
+	encf.PutUint64(uint64(meta.MinTs))
+	encf.PutUint64(uint64(meta.MaxTs))
+	encf.PutBytes([]byte(magic))
 
-	return encoder.Bytes(), nil
+	return encf.Bytes(), nil
 }
 
 func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
-	offset := 0
-	decoder := newDecbuf()
+	if len(data) < len(magic) {
+		return ErrInvalidSize
+	}
 
+	decf := newDecbuf()
+	// 检验数据完整性
+	if decf.String(data[len(data)-len(magic):]) != magic {
+		return ErrInvalidSize
+	}
+
+	offset := 0
 	rows := make([]metaSeries, 0)
 	for {
 		series := metaSeries{}
-		sidLen := decoder.Uint16(data[offset : offset+uint16Size])
+
+		sidLen := decf.Uint16(data[offset : offset+uint16Size])
 		offset += uint16Size
 
 		if sidLen == endOfBlock {
 			break
 		}
 
-		series.Sid = decoder.String(data[offset : offset+int(sidLen)])
+		series.Sid = decf.String(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
 
-		series.LabelLen = decoder.Uint64(data[offset : offset+uint64Size])
+		series.LabelLen = decf.Uint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
-		series.StartOffset = decoder.Uint64(data[offset : offset+uint64Size])
+		series.StartOffset = decf.Uint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
-		series.EndOffset = decoder.Uint64(data[offset : offset+uint64Size])
+		series.EndOffset = decf.Uint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
 		rows = append(rows, series)
@@ -123,35 +135,36 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	labels := make(map[string][]uint32)
 	for {
 		var sid string
-		sidLen := decoder.Uint16(data[offset : offset+uint16Size])
+
+		sidLen := decf.Uint16(data[offset : offset+uint16Size])
 		offset += uint16Size
 
 		if sidLen == endOfBlock {
 			break
 		}
 
-		sid = decoder.String(data[offset : offset+int(sidLen)])
+		sid = decf.String(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
 
-		sidCnt := decoder.Uint32(data[offset : offset+uint32Size])
+		sidCnt := decf.Uint32(data[offset : offset+uint32Size])
 		offset += uint32Size
 
 		sidLst := make([]uint32, sidCnt)
 		for i := 0; i < int(sidCnt); i++ {
-			sidLst[i] = decoder.Uint32(data[offset : offset+uint32Size])
+			sidLst[i] = decf.Uint32(data[offset : offset+uint32Size])
 			offset += uint32Size
 		}
 		labels[sid] = sidLst
 	}
 
-	meta.MinTs = int64(decoder.Uint64(data[offset : offset+uint64Size]))
+	meta.MinTs = int64(decf.Uint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
-	meta.MaxTs = int64(decoder.Uint64(data[offset : offset+uint64Size]))
+	meta.MaxTs = int64(decf.Uint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
-	if decoder.Err() != nil {
-		return decoder.Err()
+	if decf.Err() != nil {
+		return decf.Err()
 	}
 
 	meta.Labels = labels
