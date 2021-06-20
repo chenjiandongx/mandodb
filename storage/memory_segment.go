@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -52,13 +54,18 @@ func (ms *memorySegment) Type() SegmentType {
 }
 
 func (ms *memorySegment) Close() error {
-	return nil
+	_, err := writeToDisk(ms)
+	return err
 }
 
 func (ms *memorySegment) InsertRow(row *Row) {
 	row.Labels = row.Labels.AddMetricName(row.Metric)
 	series := ms.getOrCreateSeries(row)
-	series.store.Append(row.DataPoint)
+
+	outdated := series.store.Append(&row.DataPoint)
+
+	// TODO: 处理乱序数据
+	_ = outdated
 
 	ms.once.Do(func() {
 		ms.minTs = row.DataPoint.Ts
@@ -71,18 +78,20 @@ func (ms *memorySegment) InsertRow(row *Row) {
 	ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
 }
 
-func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) []MetricRet {
-	ret := make([]MetricRet, 0)
-	for _, sid := range ms.metricIdx.MatchSids(labels) {
+func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
+	matchSids := ms.metricIdx.MatchSids(labels)
+	ret := make([]MetricRet, 0, len(matchSids))
+	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
 		series := b.(*Series)
+
 		ret = append(ret, MetricRet{
 			Labels:     series.labels,
 			DataPoints: series.store.Get(start, end),
 		})
 	}
 
-	return ret
+	return ret, nil
 }
 
 func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
@@ -137,4 +146,51 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	}
 
 	return metaBytes, dataBuf, nil
+}
+
+func writeToDisk(segment Segment) (*Metadata, error) {
+	metaBytes, dataBytes, err := segment.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal segment: %s", err.Error())
+	}
+
+	prefix := filePrefix(segment.MinTs(), segment.MaxTs())
+	metaFile, dataFile := prefix+"meta", prefix+"data"
+
+	if isFileExist(metaFile) {
+		return nil, fmt.Errorf("%s meta file is exist", metaFile)
+	}
+	metaFd, err := os.OpenFile(metaFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = metaFd.Write(metaBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	defer metaFd.Close()
+
+	if isFileExist(dataFile) {
+		return nil, fmt.Errorf("%s data file is exist", dataFile)
+	}
+	dataFd, err := os.OpenFile(dataFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = dataFd.Write(dataBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	defer dataFd.Close()
+
+	md := Metadata{}
+	if err = UnmarshalMeta(metaBytes, &md); err != nil {
+		return nil, err
+	}
+
+	return &md, nil
 }

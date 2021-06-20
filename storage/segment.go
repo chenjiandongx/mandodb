@@ -14,7 +14,7 @@ const (
 
 type Segment interface {
 	InsertRow(row *Row)
-	QueryRange(labels LabelSet, start, end int64) []MetricRet
+	QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error)
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
@@ -46,12 +46,14 @@ func (sl *SegmentList) Swap(i, j int) {
 
 func (sl *SegmentList) Get(start, end int64) []Segment {
 	segs := make([]Segment, 0)
+
 	for _, seg := range sl.lst {
 		if sl.Choose(seg, start, end) {
 			segs = append(segs, seg)
 		}
 	}
 
+	// 头部永远是最新的 所以放最后
 	if sl.Choose(sl.head, start, end) {
 		segs = append(segs, sl.head)
 	}

@@ -10,12 +10,12 @@ type tszStore struct {
 	count int
 }
 
-func (store *tszStore) Append(point DataPoint) bool {
+func (store *tszStore) Append(point *DataPoint) *DataPoint {
 	if store.maxTs >= point.Ts || point.Ts <= 0 {
-		return false
+		return point
 	}
 
-	// lazy initialization
+	// 懒加载的方式初始化
 	if store.count <= 0 {
 		store.block = tsz.New(uint32(point.Ts))
 	}
@@ -23,7 +23,7 @@ func (store *tszStore) Append(point DataPoint) bool {
 	store.block.Push(uint32(point.Ts), point.Value)
 	store.count++
 
-	return true
+	return nil
 }
 
 func (store *tszStore) Get(start, end int64) []DataPoint {

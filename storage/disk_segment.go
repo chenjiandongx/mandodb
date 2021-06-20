@@ -57,12 +57,15 @@ func (ds *diskSegment) InsertRow(_ *Row) {
 	panic("mandodb: disk segments are not mutable")
 }
 
-func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) []MetricRet {
-	sids := make([]int, 0)
-	for _, sid := range ds.metricIdx.MatchSids(labels) {
+func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
+	matchSids := ds.metricIdx.MatchSids(labels)
+	sids := make([]int, 0, len(matchSids))
+
+	for _, sid := range matchSids {
 		i, _ := strconv.Atoi(sid)
 		sids = append(sids, i)
 	}
+
 	sort.Ints(sids)
 
 	ret := make([]MetricRet, 0)
@@ -76,18 +79,18 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) []MetricRet
 		labelBytes := make([]byte, labelLen)
 		_, err := reader.ReadAt(labelBytes, int64(startOffset))
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		dataBytes := make([]byte, endOffset-(startOffset+labelLen))
 		_, err = reader.ReadAt(dataBytes, int64(startOffset+labelLen))
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		iter, err := tsz.NewIterator(dataBytes)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
 		dps := make([]DataPoint, 0)
@@ -108,5 +111,5 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) []MetricRet
 		})
 	}
 
-	return ret
+	return ret, nil
 }
