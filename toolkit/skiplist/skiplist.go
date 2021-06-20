@@ -1,4 +1,4 @@
-package skiplist
+package main
 
 import (
 	"math/rand"
@@ -15,12 +15,20 @@ var (
 
 type Element struct {
 	next  []*Element
-	key   CompareKey
-	value interface{}
+	key   int64
+	value float64
 }
 
 func (e *Element) Next() *Element {
 	return e.next[0]
+}
+
+func (e *Element) Key() int64 {
+	return e.key
+}
+
+func (e *Element) Value() float64 {
+	return e.value
 }
 
 type Options struct {
@@ -29,21 +37,7 @@ type Options struct {
 	Rand        *rand.Rand
 }
 
-func (opt *Options) SetDefault() {
-	if opt.BranchCount == 0 {
-		opt.BranchCount = defaultBranchCount
-	}
-
-	if opt.MaxLevel == 0 {
-		opt.MaxLevel = defaultMaxLevel
-	}
-
-	if opt.Rand == nil {
-		opt.Rand = defaultRand
-	}
-}
-
-type List struct {
+type SkipList struct {
 	opts   *Options
 	head   *Element
 	tail   *Element
@@ -52,41 +46,41 @@ type List struct {
 	elementsCache []*Element
 }
 
-func NewList(opt *Options) *List {
-	if opt == nil {
-		opt = &Options{}
+func NewSkipList() *SkipList {
+	opt := &Options{
+		MaxLevel:    defaultMaxLevel,
+		BranchCount: defaultBranchCount,
+		Rand:        defaultRand,
 	}
-	opt.SetDefault()
 
-	return &List{
+	return &SkipList{
 		opts:          opt,
 		head:          &Element{next: make([]*Element, opt.MaxLevel)},
 		elementsCache: make([]*Element, opt.MaxLevel),
 	}
 }
 
-func (sl *List) Head() *Element {
+func (sl *SkipList) Head() *Element {
 	return sl.head.next[0]
 }
 
-func (sl *List) Tail() *Element {
+func (sl *SkipList) Tail() *Element {
 	return sl.tail
 }
 
 type Iterator interface {
 	Next() bool
-	Key() CompareKey
-	Value() interface{}
+	Key() int64
+	Value() float64
 }
 
 type slIterator struct {
-	start CompareKey
-	limit CompareKey
+	limit int64
 	ele   *Element
 }
 
 func (it *slIterator) Next() bool {
-	if it.ele == nil || it.ele.Next() == nil || Compare(it.ele.Next().key, it.limit) > 0 {
+	if it.ele == nil || it.ele.Next() == nil || it.ele.Next().key > it.limit {
 		return false
 	}
 
@@ -94,31 +88,27 @@ func (it *slIterator) Next() bool {
 	return true
 }
 
-func (it *slIterator) Key() CompareKey {
-	return it.ele.key
+func (it *slIterator) Key() int64 {
+	return it.ele.Key()
 }
 
-func (it *slIterator) Value() interface{} {
-	return it.ele.value
+func (it *slIterator) Value() float64 {
+	return it.ele.Value()
 }
 
-func (sl *List) Iter(start, end CompareKey) Iterator {
-	return &slIterator{
-		ele:   &Element{next: []*Element{sl.findElement(start, true)}},
-		start: start,
-		limit: end,
-	}
+func (sl *SkipList) Iter(start, limit int64) Iterator {
+	return &slIterator{ele: &Element{next: []*Element{sl.findElement(start, true)}}, limit: limit}
 }
 
-func (sl *List) Get(key CompareKey) *Element {
+func (sl *SkipList) Get(key int64) *Element {
 	return sl.findElement(key, false)
 }
 
-func (sl *List) Add(key CompareKey, value interface{}) *Element {
+func (sl *SkipList) Add(key int64, value float64) *Element {
 	var element *Element
 	prevs := sl.getPrevElements(key)
 
-	if element = prevs[0].next[0]; element != nil && Compare(element.key, key) == 0 {
+	if element = prevs[0].next[0]; element != nil && element.key == key {
 		element.value = value
 		return element
 	}
@@ -138,10 +128,10 @@ func (sl *List) Add(key CompareKey, value interface{}) *Element {
 	return element
 }
 
-func (sl *List) Remove(key CompareKey) *Element {
+func (sl *SkipList) Remove(key int64) *Element {
 	prevs := sl.getPrevElements(key)
 
-	if element := prevs[0].next[0]; element != nil && Compare(element.key, key) == 0 {
+	if element := prevs[0].next[0]; element != nil && element.key == key {
 		for k, v := range element.next {
 			prevs[k].next[k] = v
 		}
@@ -153,11 +143,11 @@ func (sl *List) Remove(key CompareKey) *Element {
 	return nil
 }
 
-func (sl *List) Len() int {
+func (sl *SkipList) Len() int {
 	return sl.length
 }
 
-func (sl *List) Exist(key CompareKey) bool {
+func (sl *SkipList) Exist(key int64) bool {
 	if v := sl.Get(key); v != nil {
 		return true
 	}
@@ -165,19 +155,19 @@ func (sl *List) Exist(key CompareKey) bool {
 	return false
 }
 
-func (sl *List) findElement(key CompareKey, isPrev bool) *Element {
+func (sl *SkipList) findElement(key int64, isPrev bool) *Element {
 	prev := sl.head
 	var next *Element
 
 	for i := sl.opts.MaxLevel - 1; i >= 0; i-- {
 		next = prev.next[i]
 
-		for next != nil && Compare(key, next.key) > 0 {
+		for next != nil && key > next.key {
 			prev = next
 			next = next.next[i]
 		}
 
-		if next != nil && Compare(key, next.key) == 0 {
+		if next != nil && key == next.key {
 			return next
 		}
 	}
@@ -189,13 +179,13 @@ func (sl *List) findElement(key CompareKey, isPrev bool) *Element {
 	return nil
 }
 
-func (sl *List) getPrevElements(key CompareKey) []*Element {
+func (sl *SkipList) getPrevElements(key int64) []*Element {
 	prev := sl.head
 	cache := sl.elementsCache
 	var next *Element
 	for i := sl.opts.MaxLevel - 1; i >= 0; i-- {
 		next = prev.next[i]
-		for next != nil && Compare(key, next.key) > 0 {
+		for next != nil && key > next.key {
 			prev = next
 			next = next.next[i]
 		}
@@ -206,32 +196,11 @@ func (sl *List) getPrevElements(key CompareKey) []*Element {
 	return cache
 }
 
-func (sl *List) randLevel() int {
+func (sl *SkipList) randLevel() int {
 	l := 1
 	for l < int(sl.opts.MaxLevel) && sl.opts.Rand.Int63()%sl.opts.BranchCount == 0 {
 		l++
 	}
 
 	return l
-}
-
-type CompareKey struct {
-	Start int64
-	End   int64
-}
-
-func NewSingleKey(a int64) CompareKey {
-	return CompareKey{Start: a, End: a}
-}
-
-func Compare(a, b CompareKey) int {
-	if a.Start == b.Start && a.End == b.End {
-		return 0
-	}
-
-	if a.End <= b.Start {
-		return -1
-	}
-
-	return 1
 }

@@ -2,42 +2,43 @@ package main
 
 import (
 	"fmt"
-	"strconv"
-	"time"
-
 	"github.com/chenjiandongx/mandodb/storage"
+	"time"
 )
 
 func main() {
 	store := storage.OpenTSDB()
+	defer store.Close()
 
-	now := time.Now().Unix()
+	//var now int64 = 1
 
-	for i := 1; i <= 150; i++ {
-		for j := 0; j < 12; j++ {
-			for k := 0; k < 64; k++ {
-				store.InsertRow(&storage.Row{
-					Metric: "cpu.busy",
-					Labels: []storage.Label{
-						{Name: "core", Value: strconv.Itoa(k)},
-						{Name: "node", Value: "vm" + strconv.Itoa(j)},
-					},
-					DataPoint: storage.DataPoint{Ts: now, Value: float64(i)},
-				})
-			}
-		}
+	// 1108992 > 100w
+	//for i := 1; i <= 1444; i++ { // 2h
+	//	for j := 0; j < 12; j++ { //
+	//		for k := 0; k < 64; k++ {
+	//			store.InsertRow(&storage.Row{
+	//				Metric: "cpu.busy",
+	//				Labels: []storage.Label{
+	//					{Name: "core", Value: strconv.Itoa(k)},
+	//					{Name: "node", Value: "vm" + strconv.Itoa(j)},
+	//				},
+	//				DataPoint: storage.DataPoint{Ts: now, Value: float64(i)},
+	//			})
+	//		}
+	//	}
+	//
+	//	now += 5
+	//}
 
-		now += 65
-	}
-
-	fmt.Println(now-(5*100), now-(5*20))
+	t0 := time.Now()
 	store.QueryRange(
 		"cpu.busy",
 		[]storage.Label{
-			//{Name: "node", Value: "vm1"},
+			{Name: "node", Value: "vm1"},
 			{Name: "core", Value: "12"},
 		},
-		now-(5*100),
-		now-(5*20),
+		0,
+		50,
 	)
+	fmt.Println("take:", time.Since(t0))
 }

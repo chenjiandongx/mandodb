@@ -2,7 +2,10 @@ package storage
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/chenjiandongx/mandodb/toolkit/mmap"
@@ -45,9 +48,10 @@ type TSDB struct {
 }
 
 func (tsdb *TSDB) InsertRow(row *Row) error {
-	tsdb.mut.Lock()
+	//tsdb.mut.Lock()
+	//defer tsdb.mut.Unlock()
 	if tsdb.segs.head.Frozen() {
-		prefix := fmt.Sprintf("segment-%d-%d.", tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs())
+		prefix := fmt.Sprintf("seg-%d-%d.", tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs())
 		meta, err := tsdb.flushToDisk(tsdb.segs.head)
 		if err != nil {
 			return fmt.Errorf("failed to flush data to disk, %v", err)
@@ -63,7 +67,7 @@ func (tsdb *TSDB) InsertRow(row *Row) error {
 		newseg := newMemorySegment()
 		tsdb.segs.head = newseg
 	}
-	tsdb.mut.Unlock()
+	//tsdb.mut.Unlock()
 
 	tsdb.segs.head.InsertRow(row)
 	return nil
@@ -83,13 +87,61 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 	return nil
 }
 
+func (tsdb *TSDB) Close() {
+	for _, segment := range tsdb.segs.lst {
+		segment.Close()
+	}
+}
+
+func (tsdb *TSDB) loadFiles() {
+	files, err := ioutil.ReadDir(".")
+	if err != nil {
+		panic(err)
+	}
+
+	// 确保文件按时间排序
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name() < files[j].Name()
+	})
+
+	for _, file := range files {
+		if !strings.HasPrefix(file.Name(), "seg-") {
+			continue
+		}
+
+		if strings.HasSuffix(file.Name(), ".meta") {
+			bs, err := ioutil.ReadFile(file.Name())
+			if err != nil {
+				panic(err)
+			}
+
+			meta := Metadata{}
+			UnmarshalMeta(bs, &meta)
+
+			mf, err := mmap.OpenMmapFile(strings.ReplaceAll(file.Name(), ".meta", ".data"))
+			if err != nil {
+				panic(err)
+			}
+
+			diskseg := &diskSegment{
+				mf:        mf,
+				metricIdx: buildIndexMapForDisk(meta.Labels),
+				series:    meta.Series,
+				minTs:     meta.MinTs,
+				maxTs:     meta.MaxTs,
+			}
+			tsdb.segs.Add(diskseg)
+		}
+	}
+}
+
 func (tsdb *TSDB) flushToDisk(segment Segment) (*Metadata, error) {
 	metaBytes, dataBytes, err := segment.Marshal()
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal segment: %s", err.Error())
 	}
 
-	prefix := fmt.Sprintf("segment-%d-%d.", segment.MinTs(), segment.MaxTs())
+	prefix := fmt.Sprintf("seg-%d-%d.", segment.MinTs(), segment.MaxTs())
 	metaFile, dataFile := prefix+"meta", prefix+"data"
 
 	if isFileExist(metaFile) {
@@ -115,7 +167,7 @@ func (tsdb *TSDB) flushToDisk(segment Segment) (*Metadata, error) {
 	defer dataFd.Close()
 
 	md := Metadata{}
-	if err = segment.Unmarshal(metaBytes, &md); err != nil {
+	if err = UnmarshalMeta(metaBytes, &md); err != nil {
 		return nil, err
 	}
 
@@ -123,5 +175,8 @@ func (tsdb *TSDB) flushToDisk(segment Segment) (*Metadata, error) {
 }
 
 func OpenTSDB() *TSDB {
-	return &TSDB{segs: newSegmentList()}
+	tsdb := &TSDB{segs: newSegmentList()}
+	tsdb.loadFiles()
+
+	return tsdb
 }

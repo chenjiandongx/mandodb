@@ -2,8 +2,7 @@ package storage
 
 import (
 	"os"
-
-	"github.com/chenjiandongx/mandodb/toolkit/skiplist"
+	"sort"
 )
 
 type SegmentType string
@@ -20,36 +19,37 @@ type Segment interface {
 	MaxTs() int64
 	Frozen() bool
 	Marshal() ([]byte, []byte, error)
-	Unmarshal([]byte, *Metadata) error
 	Type() SegmentType
+	Close() error
 }
 
 type SegmentList struct {
 	head Segment
-	lst  *skiplist.List
+	lst  []Segment
 }
 
 func newSegmentList() *SegmentList {
-	return &SegmentList{
-		head: newMemorySegment(),
-		lst:  skiplist.NewList(nil),
-	}
+	return &SegmentList{head: newMemorySegment()}
+}
+
+func (sl *SegmentList) Less(i, j int) bool {
+	return sl.lst[i].MaxTs() < sl.lst[j].MinTs()
+}
+
+func (sl *SegmentList) Len() int {
+	return len(sl.lst)
+}
+
+func (sl *SegmentList) Swap(i, j int) {
+	sl.lst[i], sl.lst[j] = sl.lst[j], sl.lst[i]
 }
 
 func (sl *SegmentList) Get(start, end int64) []Segment {
 	segs := make([]Segment, 0)
-
-	startKey := skiplist.NewSingleKey(start)
-	endKey := skiplist.NewSingleKey(end)
-
-	iter := sl.lst.Iter(startKey, endKey)
-	for iter.Next() {
-		seg, ok := iter.Value().(Segment)
-		if !ok || skiplist.Compare(iter.Key(), startKey) < 0 {
-			continue
+	for _, seg := range sl.lst {
+		if sl.Choose(seg, start, end) {
+			segs = append(segs, seg)
 		}
-
-		segs = append(segs, seg)
 	}
 
 	if sl.Choose(sl.head, start, end) {
@@ -76,21 +76,12 @@ func (sl *SegmentList) Choose(seg Segment, start, end int64) bool {
 }
 
 func (sl *SegmentList) Add(segment Segment) {
-	comparekey := skiplist.CompareKey{
-		Start: segment.MinTs(),
-		End:   segment.MaxTs(),
-	}
-
-	sl.lst.Add(comparekey, segment)
+	sl.lst = append(sl.lst, segment)
+	sort.Sort(sl)
 }
 
 func (sl *SegmentList) Remove(segment Segment) {
-	comparekey := skiplist.CompareKey{
-		Start: segment.MinTs(),
-		End:   segment.MaxTs(),
-	}
 
-	sl.lst.Remove(comparekey)
 }
 
 const metricName = "__name__"

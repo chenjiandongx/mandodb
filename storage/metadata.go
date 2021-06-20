@@ -11,6 +11,16 @@ const (
 	BinaryMetaSerializer
 )
 
+var defaultMetaSerializer = &binaryMetaSerializer{}
+
+func MarshalMeta(meta Metadata) ([]byte, error) {
+	return defaultMetaSerializer.Marshal(meta)
+}
+
+func UnmarshalMeta(data []byte, meta *Metadata) error {
+	return defaultMetaSerializer.Unmarshal(data, meta)
+}
+
 type metaSeries struct {
 	Sid         string `json:"sid"`
 	LabelLen    uint64 `json:"labelLen"`
@@ -19,6 +29,8 @@ type metaSeries struct {
 }
 
 type Metadata struct {
+	MinTs  int64               `json:"minTs"`
+	MaxTs  int64               `json:"maxTs"`
 	Series []metaSeries        `json:"series"`
 	Labels map[string][]uint32 `json:"labels"`
 }
@@ -72,6 +84,8 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 		encoder.PutUint32(sids...)
 	}
 	encoder.PutUint16(endOfBlock)
+	encoder.PutUint64(uint64(meta.MinTs))
+	encoder.PutUint64(uint64(meta.MaxTs))
 
 	return encoder.Bytes(), nil
 }
@@ -129,6 +143,12 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 		}
 		labels[sid] = sidLst
 	}
+
+	meta.MinTs = int64(decoder.Uint64(data[offset : offset+uint64Size]))
+	offset += uint64Size
+
+	meta.MaxTs = int64(decoder.Uint64(data[offset : offset+uint64Size]))
+	offset += uint64Size
 
 	if decoder.Err() != nil {
 		return decoder.Err()

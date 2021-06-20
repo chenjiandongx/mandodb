@@ -13,14 +13,11 @@ type memorySegment struct {
 
 	minTs int64
 	maxTs int64
-
-	metaSerializer MetaSerializer
 }
 
 func newMemorySegment() Segment {
 	segment := &memorySegment{
-		metricIdx:      newIndexMap(),
-		metaSerializer: &binaryMetaSerializer{},
+		metricIdx: newIndexMap(),
 	}
 
 	return segment
@@ -47,15 +44,15 @@ func (ms *memorySegment) MaxTs() int64 {
 }
 
 func (ms *memorySegment) Frozen() bool {
-	return ms.MaxTs()-ms.MinTs() >= 600
-}
-
-func (ms *memorySegment) Unmarshal(bs []byte, metadata *Metadata) error {
-	return ms.metaSerializer.Unmarshal(bs, metadata)
+	return ms.MaxTs()-ms.MinTs() >= 3600
 }
 
 func (ms *memorySegment) Type() SegmentType {
 	return MemorySegmentType
+}
+
+func (ms *memorySegment) Close() error {
+	return nil
 }
 
 func (ms *memorySegment) InsertRow(row *Row) {
@@ -95,7 +92,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	size := 0
 
 	dataBuf := make([]byte, 0)
-	meta := Metadata{}
+	meta := Metadata{MinTs: ms.minTs, MaxTs: ms.maxTs}
 
 	ms.segment.Range(func(key, value interface{}) bool {
 		sid := key.(string)
@@ -134,7 +131,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	})
 	meta.Labels = labelIdx
 
-	metaBytes, err := ms.metaSerializer.Marshal(meta)
+	metaBytes, err := MarshalMeta(meta)
 	if err != nil {
 		return nil, nil, err
 	}

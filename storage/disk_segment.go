@@ -41,17 +41,16 @@ func (ds *diskSegment) Frozen() bool {
 	return true
 }
 
-// TODO: 初始化时直接从磁盘读取
-func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
-	return nil, nil, nil
-}
-
-func (ds *diskSegment) Unmarshal(_ []byte, _ *Metadata) error {
-	return nil
-}
-
 func (ds *diskSegment) Type() SegmentType {
 	return DiskSegmentType
+}
+
+func (ds *diskSegment) Close() error {
+	return ds.mf.Close()
+}
+
+func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
+	return nil, nil, nil
 }
 
 func (ds *diskSegment) InsertRow(_ *Row) {
