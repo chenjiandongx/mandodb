@@ -20,33 +20,33 @@ func (e *encbuf) Reset()        { e.B = e.B[:0] }
 func (e *encbuf) Bytes() []byte { return e.B }
 func (e *encbuf) Len() int      { return len(e.B) }
 
-func (e *encbuf) PutUint16(nums ...uint16) {
+func (e *encbuf) MarshalUint16(nums ...uint16) {
 	for _, num := range nums {
 		binary.LittleEndian.PutUint16(e.C[:], num)
 		e.B = append(e.B, e.C[:uint16Size]...)
 	}
 }
 
-func (e *encbuf) PutUint32(nums ...uint32) {
+func (e *encbuf) MarshalUint32(nums ...uint32) {
 	for _, num := range nums {
 		binary.LittleEndian.PutUint32(e.C[:], num)
 		e.B = append(e.B, e.C[:uint32Size]...)
 	}
 }
 
-func (e *encbuf) PutUint64(nums ...uint64) {
+func (e *encbuf) MarshalUint64(nums ...uint64) {
 	for _, num := range nums {
 		binary.LittleEndian.PutUint64(e.C[:], num)
 		e.B = append(e.B, e.C[:uint64Size]...)
 	}
 }
 
-func (e *encbuf) PutString(s string) {
+func (e *encbuf) MarshalString(s string) {
 	e.B = append(e.B, s...)
 }
 
-func (e *encbuf) PutBytes(b []byte) {
-	e.B = append(e.B, b...)
+func (e *encbuf) MarshalUint8(b uint8) {
+	e.B = append(e.B, b)
 }
 
 var (
@@ -62,7 +62,7 @@ func newDecbuf() *decbuf {
 	return &decbuf{}
 }
 
-func (d *decbuf) Uint16(b []byte) uint16 {
+func (d *decbuf) UnmarshalUint16(b []byte) uint16 {
 	if len(b) < uint16Size {
 		d.err = ErrInvalidSize
 		return 0
@@ -70,7 +70,7 @@ func (d *decbuf) Uint16(b []byte) uint16 {
 	return binary.LittleEndian.Uint16(b)
 }
 
-func (d *decbuf) Uint32(b []byte) uint32 {
+func (d *decbuf) UnmarshalUint32(b []byte) uint32 {
 	if len(b) < uint32Size {
 		d.err = ErrInvalidSize
 		return 0
@@ -78,7 +78,7 @@ func (d *decbuf) Uint32(b []byte) uint32 {
 	return binary.LittleEndian.Uint32(b)
 }
 
-func (d *decbuf) Uint64(b []byte) uint64 {
+func (d *decbuf) UnmarshalUint64(b []byte) uint64 {
 	if len(b) < uint64Size {
 		d.err = ErrInvalidSize
 		return 0
@@ -86,7 +86,7 @@ func (d *decbuf) Uint64(b []byte) uint64 {
 	return binary.LittleEndian.Uint64(b)
 }
 
-func (d *decbuf) String(b []byte) string {
+func (d *decbuf) UnmarshalString(b []byte) string {
 	return yoloString(b)
 }
 

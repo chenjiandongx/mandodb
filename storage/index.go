@@ -108,7 +108,22 @@ func (im *indexMap) UpdateIndex(sid string, labels LabelSet) {
 	}
 }
 
-func (im *indexMap) MatchSids(labels LabelSet) []string {
+func (im *indexMap) MatchSidsString(labels LabelSet) []string {
+	return im.matchSids(labels)
+}
+
+func (im *indexMap) MatchSidsInt(labels LabelSet) []int {
+	sids := im.matchSids(labels)
+	ret := make([]int, 0, len(sids))
+	for _, sid := range im.matchSids(labels) {
+		i, _ := strconv.Atoi(sid)
+		ret = append(ret, i)
+	}
+
+	return ret
+}
+
+func (im *indexMap) matchSids(labels LabelSet) []string {
 	im.mut.Lock()
 	defer im.mut.Unlock()
 

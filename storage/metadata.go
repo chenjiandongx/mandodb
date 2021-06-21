@@ -57,10 +57,11 @@ func (s *jsonMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 type binaryMetaSerializer struct{}
 
 const (
-	endOfBlock uint16 = 0xffff
-	uint16Size        = 2
-	uint32Size        = 4
-	uint64Size        = 8
+	endOfBlock uint8 = 0xff
+	uint8Size        = 1
+	uint16Size       = 2
+	uint32Size       = 4
+	uint64Size       = 8
 
 	magic = "https://github.com/chenjiandongx/mandodb"
 )
@@ -73,22 +74,22 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	encf := newEncbuf()
 
 	for _, series := range meta.Series {
-		encf.PutUint16(uint16(len(series.Sid)))
-		encf.PutString(series.Sid)
-		encf.PutUint64(series.LabelLen, series.StartOffset, series.EndOffset)
+		encf.MarshalUint8(uint8(len(series.Sid)))
+		encf.MarshalString(series.Sid)
+		encf.MarshalUint64(series.LabelLen, series.StartOffset, series.EndOffset)
 	}
-	encf.PutUint16(endOfBlock)
+	encf.MarshalUint8(endOfBlock)
 
 	for name, sids := range meta.Labels {
-		encf.PutUint16(uint16(len(name)))
-		encf.PutString(name)
-		encf.PutUint32(uint32(len(sids)))
-		encf.PutUint32(sids...)
+		encf.MarshalUint8(uint8(len(name)))
+		encf.MarshalString(name)
+		encf.MarshalUint32(uint32(len(sids)))
+		encf.MarshalUint32(sids...)
 	}
-	encf.PutUint16(endOfBlock)
-	encf.PutUint64(uint64(meta.MinTs))
-	encf.PutUint64(uint64(meta.MaxTs))
-	encf.PutBytes([]byte(magic))
+	encf.MarshalUint8(endOfBlock)
+	encf.MarshalUint64(uint64(meta.MinTs))
+	encf.MarshalUint64(uint64(meta.MaxTs))
+	encf.MarshalString(magic)
 
 	return encf.Bytes(), nil
 }
@@ -100,7 +101,7 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 	decf := newDecbuf()
 	// 检验数据完整性
-	if decf.String(data[len(data)-len(magic):]) != magic {
+	if decf.UnmarshalString(data[len(data)-len(magic):]) != magic {
 		return ErrInvalidSize
 	}
 
@@ -109,23 +110,23 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	for {
 		series := metaSeries{}
 
-		sidLen := decf.Uint16(data[offset : offset+uint16Size])
-		offset += uint16Size
+		sidLen := data[offset]
+		offset += uint8Size
 
 		if sidLen == endOfBlock {
 			break
 		}
 
-		series.Sid = decf.String(data[offset : offset+int(sidLen)])
+		series.Sid = decf.UnmarshalString(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
 
-		series.LabelLen = decf.Uint64(data[offset : offset+uint64Size])
+		series.LabelLen = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
-		series.StartOffset = decf.Uint64(data[offset : offset+uint64Size])
+		series.StartOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
-		series.EndOffset = decf.Uint64(data[offset : offset+uint64Size])
+		series.EndOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
 		rows = append(rows, series)
@@ -136,31 +137,31 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	for {
 		var sid string
 
-		sidLen := decf.Uint16(data[offset : offset+uint16Size])
-		offset += uint16Size
+		sidLen := data[offset]
+		offset += uint8Size
 
 		if sidLen == endOfBlock {
 			break
 		}
 
-		sid = decf.String(data[offset : offset+int(sidLen)])
+		sid = decf.UnmarshalString(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
 
-		sidCnt := decf.Uint32(data[offset : offset+uint32Size])
+		sidCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
 		offset += uint32Size
 
 		sidLst := make([]uint32, sidCnt)
 		for i := 0; i < int(sidCnt); i++ {
-			sidLst[i] = decf.Uint32(data[offset : offset+uint32Size])
+			sidLst[i] = decf.UnmarshalUint32(data[offset : offset+uint32Size])
 			offset += uint32Size
 		}
 		labels[sid] = sidLst
 	}
 
-	meta.MinTs = int64(decf.Uint64(data[offset : offset+uint64Size]))
+	meta.MinTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
-	meta.MaxTs = int64(decf.Uint64(data[offset : offset+uint64Size]))
+	meta.MaxTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
 	if decf.Err() != nil {

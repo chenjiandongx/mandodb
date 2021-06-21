@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cespare/xxhash"
+
 	"github.com/chenjiandongx/mandodb/toolkit/mmap"
 )
 
@@ -36,8 +38,12 @@ type Row struct {
 	DataPoint DataPoint
 }
 
+func (r Row) M() uint64 {
+	return xxhash.Sum64([]byte(r.Metric))
+}
+
 func (r Row) ID() string {
-	return joinSeparator(r.Metric, r.Labels.Hash())
+	return joinSeparator(r.M(), r.Labels.Hash())
 }
 
 type MetricRet struct {

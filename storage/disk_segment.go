@@ -3,7 +3,6 @@ package storage
 import (
 	"bytes"
 	"sort"
-	"strconv"
 
 	"github.com/dgryski/go-tsz"
 
@@ -58,14 +57,7 @@ func (ds *diskSegment) InsertRows(_ []*Row) {
 }
 
 func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	matchSids := ds.metricIdx.MatchSids(labels)
-	sids := make([]int, 0, len(matchSids))
-
-	for _, sid := range matchSids {
-		i, _ := strconv.Atoi(sid)
-		sids = append(sids, i)
-	}
-
+	sids := ds.metricIdx.MatchSidsInt(labels)
 	sort.Ints(sids)
 
 	ret := make([]MetricRet, 0)
