@@ -179,8 +179,7 @@ type diskIndexMap struct {
 	label2sids   map[string]*diskSidSet
 	labelOrdered map[int]string
 
-	sid2Labels map[string]*diskSidSet
-	mut        sync.Mutex
+	mut sync.Mutex
 }
 
 func newDiskIndexMap(swl []seriesWithLabel) *diskIndexMap {

@@ -21,22 +21,22 @@ func UnmarshalMeta(data []byte, meta *Metadata) error {
 }
 
 type metaSeries struct {
-	Sid         string   `json:"sid"`
-	StartOffset uint64   `json:"startOffset"`
-	EndOffset   uint64   `json:"endOffset"`
-	Labels      []uint32 `json:"labels"`
+	Sid         string
+	StartOffset uint64
+	EndOffset   uint64
+	Labels      []uint32
 }
 
 type seriesWithLabel struct {
-	Name string   `json:"name"`
-	Sids []uint32 `json:"sids"`
+	Name string
+	Sids []uint32
 }
 
 type Metadata struct {
-	MinTs  int64             `json:"minTs"`
-	MaxTs  int64             `json:"maxTs"`
-	Series []metaSeries      `json:"series"`
-	Labels []seriesWithLabel `json:"labels"` // labels -> sid
+	MinTs  int64
+	MaxTs  int64
+	Series []metaSeries
+	Labels []seriesWithLabel // labels -> sid
 
 	sidRelatedLabels []LabelSet
 }
