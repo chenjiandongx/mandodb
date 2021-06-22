@@ -1,136 +1,109 @@
 package storage
 
 import (
-	"strconv"
+	"strings"
 	"sync"
 )
 
-type sidSet struct {
-	mut sync.Mutex
+// Memory Index
+
+type memorySidSet struct {
 	set map[string]struct{}
+	mut sync.Mutex
 }
 
-func newSidSet() *sidSet {
-	return &sidSet{set: make(map[string]struct{})}
+func newMemorySidSet() *memorySidSet {
+	return &memorySidSet{set: make(map[string]struct{})}
 }
 
-func (s *sidSet) Add(sid string) {
-	s.mut.Lock()
-	defer s.mut.Unlock()
+func (mss *memorySidSet) Add(a string) {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
 
-	s.set[sid] = struct{}{}
+	mss.set[a] = struct{}{}
 }
 
-func (s *sidSet) Size() int {
-	s.mut.Lock()
-	defer s.mut.Unlock()
+func (mss *memorySidSet) Size() int {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
 
-	return len(s.set)
+	return len(mss.set)
 }
 
-func (s *sidSet) Copy() *sidSet {
-	s.mut.Lock()
-	defer s.mut.Unlock()
+func (mss *memorySidSet) Copy() *memorySidSet {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
 
-	newset := newSidSet()
-	for k := range s.set {
+	newset := newMemorySidSet()
+	for k := range mss.set {
 		newset.set[k] = struct{}{}
 	}
 
 	return newset
 }
 
-func (s *sidSet) Intersection(other *sidSet) {
-	s.mut.Lock()
-	defer s.mut.Unlock()
+func (mss *memorySidSet) Intersection(other *memorySidSet) {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
 
-	for k := range s.set {
+	for k := range mss.set {
 		_, ok := other.set[k]
 		if !ok {
-			delete(s.set, k)
+			delete(mss.set, k)
 		}
 	}
 }
 
-func (s *sidSet) List() []string {
-	s.mut.Lock()
-	defer s.mut.Unlock()
+func (mss *memorySidSet) List() []string {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
 
-	keys := make([]string, 0, len(s.set))
-	for k := range s.set {
+	keys := make([]string, 0, len(mss.set))
+	for k := range mss.set {
 		keys = append(keys, k)
 	}
 
 	return keys
 }
 
-type indexMap struct {
-	idx map[string]*sidSet
+type memoryIndexMap struct {
+	idx map[string]*memorySidSet
 	mut sync.Mutex
 }
 
-func newIndexMap() *indexMap {
-	return &indexMap{idx: make(map[string]*sidSet)}
+func newMemoryIndexMap() *memoryIndexMap {
+	return &memoryIndexMap{idx: make(map[string]*memorySidSet)}
 }
 
-func (im *indexMap) Range(f func(k string, v *sidSet)) {
-	im.mut.Lock()
-	defer im.mut.Unlock()
+func (mim *memoryIndexMap) Range(f func(k string, v *memorySidSet)) {
+	mim.mut.Lock()
+	defer mim.mut.Unlock()
 
-	for k, sids := range im.idx {
+	for k, sids := range mim.idx {
 		f(k, sids)
 	}
 }
 
-func buildIndexMapForDisk(m map[string][]uint32) *indexMap {
-	idxmap := &indexMap{idx: map[string]*sidSet{}}
-
-	for k, sids := range m {
-		idxmap.idx[k] = newSidSet()
-		for _, sid := range sids {
-			idxmap.idx[k].Add(strconv.Itoa(int(sid)))
-		}
-	}
-
-	return idxmap
-}
-
-func (im *indexMap) UpdateIndex(sid string, labels LabelSet) {
-	im.mut.Lock()
-	defer im.mut.Unlock()
+func (mim *memoryIndexMap) UpdateIndex(sid string, labels LabelSet) {
+	mim.mut.Lock()
+	defer mim.mut.Unlock()
 
 	for _, label := range labels {
-		key := joinSeparator(label.Name, label.Value)
-		if _, ok := im.idx[key]; !ok {
-			im.idx[key] = newSidSet()
+		key := label.MarshalName()
+		if _, ok := mim.idx[key]; !ok {
+			mim.idx[key] = newMemorySidSet()
 		}
-		im.idx[key].Add(sid)
+		mim.idx[key].Add(sid)
 	}
 }
 
-func (im *indexMap) MatchSidsString(labels LabelSet) []string {
-	return im.matchSids(labels)
-}
+func (mim *memoryIndexMap) MatchSids(labels LabelSet) []string {
+	mim.mut.Lock()
+	defer mim.mut.Unlock()
 
-func (im *indexMap) MatchSidsInt(labels LabelSet) []int {
-	sids := im.matchSids(labels)
-	ret := make([]int, 0, len(sids))
-	for _, sid := range im.matchSids(labels) {
-		i, _ := strconv.Atoi(sid)
-		ret = append(ret, i)
-	}
-
-	return ret
-}
-
-func (im *indexMap) matchSids(labels LabelSet) []string {
-	im.mut.Lock()
-	defer im.mut.Unlock()
-
-	sids := newSidSet()
+	sids := newMemorySidSet()
 	for i := len(labels) - 1; i >= 0; i-- {
-		key := joinSeparator(labels[i].Name, labels[i].Value)
-		midx := im.idx[key]
+		midx := mim.idx[labels[i].MarshalName()]
 
 		if labels[i].Name == metricName {
 			// 匹配不到 metricName 则表明该 metric 不存在 直接返回
@@ -147,6 +120,133 @@ func (im *indexMap) matchSids(labels LabelSet) []string {
 
 		if midx != nil {
 			sids.Intersection(midx.Copy())
+		}
+	}
+
+	return sids.List()
+}
+
+// Disk Index
+
+type diskSidSet struct {
+	set map[uint32]struct{}
+	mut sync.Mutex
+}
+
+func newDiskSidSet() *diskSidSet {
+	return &diskSidSet{set: make(map[uint32]struct{})}
+}
+
+func (dss *diskSidSet) Add(a uint32) {
+	dss.mut.Lock()
+	defer dss.mut.Unlock()
+
+	dss.set[a] = struct{}{}
+}
+
+func (dss *diskSidSet) Size() int {
+	dss.mut.Lock()
+	defer dss.mut.Unlock()
+
+	return len(dss.set)
+}
+
+func (dss *diskSidSet) Intersection(other *diskSidSet) {
+	dss.mut.Lock()
+	defer dss.mut.Unlock()
+
+	for k := range dss.set {
+		_, ok := other.set[k]
+		if !ok {
+			delete(dss.set, k)
+		}
+	}
+}
+
+func (dss *diskSidSet) List() []uint32 {
+	dss.mut.Lock()
+	defer dss.mut.Unlock()
+
+	keys := make([]uint32, 0, len(dss.set))
+	for k := range dss.set {
+		keys = append(keys, k)
+	}
+
+	return keys
+}
+
+type diskIndexMap struct {
+	label2sids   map[string]*diskSidSet
+	labelOrdered map[int]string
+
+	sid2Labels map[string]*diskSidSet
+	mut        sync.Mutex
+}
+
+func newDiskIndexMap(swl []seriesWithLabel) *diskIndexMap {
+	dim := &diskIndexMap{
+		label2sids:   make(map[string]*diskSidSet),
+		labelOrdered: make(map[int]string),
+	}
+
+	for i := range swl {
+		row := swl[i]
+		dim.label2sids[row.Name] = newDiskSidSet()
+		for _, sid := range swl[i].Sids {
+			dim.label2sids[row.Name].Add(sid)
+		}
+		dim.labelOrdered[i] = row.Name
+	}
+
+	return dim
+}
+
+func (dim *diskIndexMap) MatchLabels(lids ...uint32) []Label {
+	ret := make([]Label, 0, len(lids))
+	for _, lid := range lids {
+		labelPair := dim.labelOrdered[int(lid)]
+		kv := strings.SplitN(labelPair, separator, 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		if kv[0] == metricName {
+			continue
+		}
+
+		ret = append(ret, Label{
+			Name:  kv[0],
+			Value: kv[1],
+		})
+	}
+
+	return ret
+}
+
+func (dim *diskIndexMap) MatchSids(labels LabelSet) []uint32 {
+	dim.mut.Lock()
+	defer dim.mut.Unlock()
+
+	sids := newDiskSidSet()
+	for i := len(labels) - 1; i >= 0; i-- {
+		midx := dim.label2sids[labels[i].MarshalName()]
+
+		if labels[i].Name == metricName {
+			// 匹配不到 metricName 则表明该 metric 不存在 直接返回
+			if midx == nil {
+				return nil
+			}
+
+			// 从磁盘 chuck 是不可变的 所以 map 不会有更新操作 无需 copy
+			sids = midx
+			if sids.Size() <= 0 {
+				return nil
+			}
+			continue
+		}
+
+		if midx != nil {
+			sids.Intersection(midx)
 		}
 	}
 

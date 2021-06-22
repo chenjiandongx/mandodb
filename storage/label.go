@@ -9,10 +9,6 @@ import (
 	"github.com/cespare/xxhash"
 )
 
-const (
-	labelSep = ":/:"
-)
-
 var labelBufPool = sync.Pool{
 	New: func() interface{} {
 		return make([]byte, 0, 1024)
@@ -22,6 +18,10 @@ var labelBufPool = sync.Pool{
 type Label struct {
 	Name  string
 	Value string
+}
+
+func (l Label) MarshalName() string {
+	return joinSeparator(l.Name, l.Value)
 }
 
 type LabelSet []Label
@@ -86,16 +86,6 @@ func (ls LabelSet) Has(name string) bool {
 	return false
 }
 
-// Bytes 将 labels 转换为 bytes 这里的顺序无关紧要
-func (ls LabelSet) Bytes() []byte {
-	bs := make([]byte, 0, len(ls))
-	for _, label := range ls {
-		bs = append(bs, label.Name+"="+label.Value+labelSep...)
-	}
-
-	return bs
-}
-
 // String 用户格式化输出
 func (ls LabelSet) String() string {
 	var b bytes.Buffer
@@ -112,24 +102,4 @@ func (ls LabelSet) String() string {
 	}
 	b.WriteByte('}')
 	return b.String()
-}
-
-// labelBytesTo 将 byte slice 转为为 Label 直接用 bytes 进行分割 提升性能
-func labelBytesTo(bs []byte) []Label {
-	labels := make([]Label, 0)
-
-	sep := []byte(labelSep)
-	for _, label := range bytes.Split(bs, sep) {
-		pair := bytes.SplitN(label, []byte("="), 2)
-		if len(pair) < 2 {
-			continue
-		}
-
-		labels = append(labels, Label{
-			Name:  yoloString(pair[0]),
-			Value: yoloString(pair[1]),
-		})
-	}
-
-	return labels
 }

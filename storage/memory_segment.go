@@ -9,20 +9,18 @@ import (
 )
 
 type memorySegment struct {
-	once      sync.Once
-	segment   sync.Map
-	metricIdx *indexMap
+	once     sync.Once
+	segment  sync.Map
+	indexMap *memoryIndexMap
 
 	minTs int64
 	maxTs int64
 }
 
 func newMemorySegment() Segment {
-	segment := &memorySegment{
-		metricIdx: newIndexMap(),
+	return &memorySegment{
+		indexMap: newMemoryIndexMap(),
 	}
-
-	return segment
 }
 
 func (ms *memorySegment) getOrCreateSeries(row *Row) *Series {
@@ -46,6 +44,7 @@ func (ms *memorySegment) MaxTs() int64 {
 }
 
 func (ms *memorySegment) Frozen() bool {
+	// TODO: 动态配置
 	return ms.MaxTs()-ms.MinTs() >= 3600
 }
 
@@ -54,7 +53,7 @@ func (ms *memorySegment) Type() SegmentType {
 }
 
 func (ms *memorySegment) Close() error {
-	// 内存无数据就不持久化到磁盘了
+	// 内存无数据就不持久化了
 	if ms.MinTs() == 0 && ms.MaxTs() == 0 {
 		return nil
 	}
@@ -81,12 +80,12 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		if atomic.LoadInt64(&ms.maxTs) < row.DataPoint.Ts {
 			atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
 		}
-		ms.metricIdx.UpdateIndex(row.ID(), row.Labels)
+		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
 	}
 }
 
 func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	matchSids := ms.metricIdx.MatchSidsString(labels)
+	matchSids := ms.indexMap.MatchSids(labels)
 	ret := make([]MetricRet, 0, len(matchSids))
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
@@ -110,23 +109,22 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	dataBuf := make([]byte, 0)
 	meta := Metadata{MinTs: ms.minTs, MaxTs: ms.maxTs}
 
+	// key: sid
+	// value: series entity
 	ms.segment.Range(func(key, value interface{}) bool {
 		sid := key.(string)
 		sids[sid] = uint32(size)
 		size++
 
 		series := value.(*Series)
-
-		labelBytes := series.labels.Bytes()
-		dataBuf = append(dataBuf, labelBytes...)
+		meta.sidRelatedLabels = append(meta.sidRelatedLabels, series.labels)
 
 		dataBytes := series.store.Bytes()
 		dataBuf = append(dataBuf, dataBytes...)
 
-		endOffset := startOffset + len(labelBytes) + len(dataBytes)
+		endOffset := startOffset + len(dataBytes)
 		meta.Series = append(meta.Series, metaSeries{
 			Sid:         key.(string),
-			LabelLen:    uint64(len(labelBytes)),
 			StartOffset: uint64(startOffset),
 			EndOffset:   uint64(endOffset),
 		})
@@ -135,15 +133,18 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 		return true
 	})
 
-	labelIdx := make(map[string][]uint32)
-	ms.metricIdx.Range(func(k string, v *sidSet) {
+	labelIdx := make([]seriesWithLabel, 0)
+
+	// key: Label.String()
+	// value: sids...
+	ms.indexMap.Range(func(key string, value *memorySidSet) {
 		l := make([]uint32, 0)
-		for _, s := range v.List() {
+		for _, s := range value.List() {
 			l = append(l, sids[s])
 		}
 
 		sort.Slice(l, func(i, j int) bool { return l[i] < l[j] })
-		labelIdx[k] = l
+		labelIdx = append(labelIdx, seriesWithLabel{Name: key, Sids: l})
 	})
 	meta.Labels = labelIdx
 

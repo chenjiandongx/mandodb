@@ -1,14 +1,13 @@
 package storage
 
 import (
-	"encoding/json"
+	"sort"
 )
 
 type MetaSerializerType int8
 
 const (
-	JsonMetaSerializer MetaSerializerType = iota
-	BinaryMetaSerializer
+	BinaryMetaSerializer MetaSerializerType = iota
 )
 
 var defaultMetaSerializer = &binaryMetaSerializer{}
@@ -22,36 +21,29 @@ func UnmarshalMeta(data []byte, meta *Metadata) error {
 }
 
 type metaSeries struct {
-	Sid         string `json:"sid"`
-	LabelLen    uint64 `json:"labelLen"`
-	StartOffset uint64 `json:"startOffset"`
-	EndOffset   uint64 `json:"endOffset"`
+	Sid         string   `json:"sid"`
+	StartOffset uint64   `json:"startOffset"`
+	EndOffset   uint64   `json:"endOffset"`
+	Labels      []uint32 `json:"labels"`
+}
+
+type seriesWithLabel struct {
+	Name string   `json:"name"`
+	Sids []uint32 `json:"sids"`
 }
 
 type Metadata struct {
-	MinTs  int64               `json:"minTs"`
-	MaxTs  int64               `json:"maxTs"`
-	Series []metaSeries        `json:"series"`
-	Labels map[string][]uint32 `json:"labels"`
+	MinTs  int64             `json:"minTs"`
+	MaxTs  int64             `json:"maxTs"`
+	Series []metaSeries      `json:"series"`
+	Labels []seriesWithLabel `json:"labels"` // labels -> sid
+
+	sidRelatedLabels []LabelSet
 }
 
 type MetaSerializer interface {
 	Marshal(Metadata) ([]byte, error)
 	Unmarshal([]byte, *Metadata) error
-}
-
-type jsonMetaSerializer struct{}
-
-func newJSONMetaSerializer() MetaSerializer {
-	return &jsonMetaSerializer{}
-}
-
-func (s *jsonMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
-	return json.Marshal(meta)
-}
-
-func (s *jsonMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
-	return json.Unmarshal(data, meta)
 }
 
 type binaryMetaSerializer struct{}
@@ -73,20 +65,35 @@ func newBinaryMetaSerializer() MetaSerializer {
 func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	encf := newEncbuf()
 
-	for _, series := range meta.Series {
-		encf.MarshalUint8(uint8(len(series.Sid)))
-		encf.MarshalString(series.Sid)
-		encf.MarshalUint64(series.LabelLen, series.StartOffset, series.EndOffset)
+	// labels block
+	labelOrdered := make(map[string]int)
+	for idx, row := range meta.Labels {
+		labelOrdered[row.Name] = idx
+		encf.MarshalUint8(uint8(len(row.Name)))
+		encf.MarshalString(row.Name)
+		encf.MarshalUint32(uint32(len(row.Sids)))
+		encf.MarshalUint32(row.Sids...)
 	}
 	encf.MarshalUint8(endOfBlock)
 
-	for name, sids := range meta.Labels {
-		encf.MarshalUint8(uint8(len(name)))
-		encf.MarshalString(name)
-		encf.MarshalUint32(uint32(len(sids)))
-		encf.MarshalUint32(sids...)
+	// series block
+	for idx, series := range meta.Series {
+		encf.MarshalUint8(uint8(len(series.Sid)))
+		encf.MarshalString(series.Sid)
+		encf.MarshalUint64(series.StartOffset, series.EndOffset)
+
+		rl := meta.sidRelatedLabels[idx]
+		encf.MarshalUint32(uint32(rl.Len()))
+
+		lids := make([]uint32, 0, rl.Len())
+		for _, lb := range rl {
+			lids = append(lids, uint32(labelOrdered[lb.MarshalName()]))
+		}
+		sort.Slice(lids, func(i, j int) bool { return lids[i] < lids[j] })
+		encf.MarshalUint32(lids...)
 	}
 	encf.MarshalUint8(endOfBlock)
+
 	encf.MarshalUint64(uint64(meta.MinTs))
 	encf.MarshalUint64(uint64(meta.MaxTs))
 	encf.MarshalString(magic)
@@ -106,6 +113,32 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	}
 
 	offset := 0
+	labels := make([]seriesWithLabel, 0)
+	for {
+		var labelName string
+
+		labelLen := data[offset]
+		offset += uint8Size
+
+		if labelLen == endOfBlock {
+			break
+		}
+
+		labelName = decf.UnmarshalString(data[offset : offset+int(labelLen)])
+		offset += int(labelLen)
+
+		sidCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
+		offset += uint32Size
+
+		sidLst := make([]uint32, sidCnt)
+		for i := 0; i < int(sidCnt); i++ {
+			sidLst[i] = decf.UnmarshalUint32(data[offset : offset+uint32Size])
+			offset += uint32Size
+		}
+		labels = append(labels, seriesWithLabel{Name: labelName, Sids: sidLst})
+	}
+	meta.Labels = labels
+
 	rows := make([]metaSeries, 0)
 	for {
 		series := metaSeries{}
@@ -120,43 +153,25 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 		series.Sid = decf.UnmarshalString(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
 
-		series.LabelLen = decf.UnmarshalUint64(data[offset : offset+uint64Size])
-		offset += uint64Size
-
 		series.StartOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
 		series.EndOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
 
+		labelCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
+		offset += uint32Size
+
+		labelLst := make([]uint32, labelCnt)
+		for i := 0; i < int(labelCnt); i++ {
+			labelLst[i] = decf.UnmarshalUint32(data[offset : offset+uint32Size])
+			offset += uint32Size
+		}
+		series.Labels = labelLst
+
 		rows = append(rows, series)
 	}
 	meta.Series = rows
-
-	labels := make(map[string][]uint32)
-	for {
-		var sid string
-
-		sidLen := data[offset]
-		offset += uint8Size
-
-		if sidLen == endOfBlock {
-			break
-		}
-
-		sid = decf.UnmarshalString(data[offset : offset+int(sidLen)])
-		offset += int(sidLen)
-
-		sidCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
-		offset += uint32Size
-
-		sidLst := make([]uint32, sidCnt)
-		for i := 0; i < int(sidCnt); i++ {
-			sidLst[i] = decf.UnmarshalUint32(data[offset : offset+uint32Size])
-			offset += uint32Size
-		}
-		labels[sid] = sidLst
-	}
 
 	meta.MinTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
@@ -168,6 +183,5 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 		return decf.Err()
 	}
 
-	meta.Labels = labels
 	return nil
 }

@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"sort"
 
 	"github.com/dgryski/go-tsz"
 
@@ -10,9 +9,9 @@ import (
 )
 
 type diskSegment struct {
-	mf        *mmap.MmapFile
-	metricIdx *indexMap
-	series    []metaSeries
+	mf       *mmap.MmapFile
+	indexMap *diskIndexMap
+	series   []metaSeries
 
 	minTs int64
 	maxTs int64
@@ -20,11 +19,11 @@ type diskSegment struct {
 
 func newDiskSegment(mf *mmap.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
 	return &diskSegment{
-		mf:        mf,
-		series:    meta.Series,
-		metricIdx: buildIndexMapForDisk(meta.Labels),
-		minTs:     minTs,
-		maxTs:     maxTs,
+		mf:       mf,
+		series:   meta.Series,
+		indexMap: newDiskIndexMap(meta.Labels),
+		minTs:    minTs,
+		maxTs:    maxTs,
 	}
 }
 
@@ -53,29 +52,20 @@ func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
 }
 
 func (ds *diskSegment) InsertRows(_ []*Row) {
-	panic("mandodb: disk segments are not mutable")
+	panic("BUG: disk segments are not mutable")
 }
 
 func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	sids := ds.metricIdx.MatchSidsInt(labels)
-	sort.Ints(sids)
+	sids := ds.indexMap.MatchSids(labels)
 
 	ret := make([]MetricRet, 0)
 	for _, sid := range sids {
 		startOffset := ds.series[sid].StartOffset
 		endOffset := ds.series[sid].EndOffset
-		labelLen := ds.series[sid].LabelLen
 
 		reader := bytes.NewReader(ds.mf.Bytes())
-
-		labelBytes := make([]byte, labelLen)
-		_, err := reader.ReadAt(labelBytes, int64(startOffset))
-		if err != nil {
-			return nil, err
-		}
-
-		dataBytes := make([]byte, endOffset-(startOffset+labelLen))
-		_, err = reader.ReadAt(dataBytes, int64(startOffset+labelLen))
+		dataBytes := make([]byte, endOffset-startOffset)
+		_, err := reader.ReadAt(dataBytes, int64(startOffset))
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +89,7 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 
 		ret = append(ret, MetricRet{
 			DataPoints: dps,
-			Labels:     labelBytesTo(labelBytes),
+			Labels:     ds.indexMap.MatchLabels(ds.series[sid].Labels...),
 		})
 	}
 

@@ -18,13 +18,14 @@ import (
 // * 磁盘文件合并 参考 leveldb
 // * WAL 做灾备
 
+const separator = "/-/"
+
 type DataPoint struct {
 	Ts    int64
 	Value float64
 }
 
 func joinSeparator(a, b interface{}) string {
-	const separator = "/-/"
 	return fmt.Sprintf("%v%s%v", a, separator, b)
 }
 
@@ -130,25 +131,23 @@ func (tsdb *TSDB) loadFiles() {
 				panic(err)
 			}
 
-			// TODO: 这里需要校验数据的合法性 CRC32...
 			meta := Metadata{}
 			if err := UnmarshalMeta(bs, &meta); err != nil {
 				continue
 			}
 
 			datafname := strings.ReplaceAll(file.Name(), ".meta", ".data")
-			fmt.Println("datafname:", datafname)
 			mf, err := mmap.OpenMmapFile(datafname)
 			if err != nil {
 				panic(err)
 			}
 
 			diskseg := &diskSegment{
-				mf:        mf,
-				metricIdx: buildIndexMapForDisk(meta.Labels),
-				series:    meta.Series,
-				minTs:     meta.MinTs,
-				maxTs:     meta.MaxTs,
+				mf:       mf,
+				indexMap: newDiskIndexMap(meta.Labels),
+				series:   meta.Series,
+				minTs:    meta.MinTs,
+				maxTs:    meta.MaxTs,
 			}
 			tsdb.segs.Add(diskseg)
 		}

@@ -6,7 +6,8 @@ import (
 	"unsafe"
 )
 
-// Encode Buff
+// Encode Buffer
+
 type encbuf struct {
 	B []byte
 	C [binary.MaxVarintLen64]byte
@@ -20,22 +21,26 @@ func (e *encbuf) Reset()        { e.B = e.B[:0] }
 func (e *encbuf) Bytes() []byte { return e.B }
 func (e *encbuf) Len() int      { return len(e.B) }
 
-func (e *encbuf) MarshalUint16(nums ...uint16) {
-	for _, num := range nums {
+func (e *encbuf) MarshalUint8(b uint8) {
+	e.B = append(e.B, b)
+}
+
+func (e *encbuf) MarshalUint16(u ...uint16) {
+	for _, num := range u {
 		binary.LittleEndian.PutUint16(e.C[:], num)
 		e.B = append(e.B, e.C[:uint16Size]...)
 	}
 }
 
-func (e *encbuf) MarshalUint32(nums ...uint32) {
-	for _, num := range nums {
+func (e *encbuf) MarshalUint32(u ...uint32) {
+	for _, num := range u {
 		binary.LittleEndian.PutUint32(e.C[:], num)
 		e.B = append(e.B, e.C[:uint32Size]...)
 	}
 }
 
-func (e *encbuf) MarshalUint64(nums ...uint64) {
-	for _, num := range nums {
+func (e *encbuf) MarshalUint64(u ...uint64) {
+	for _, num := range u {
 		binary.LittleEndian.PutUint64(e.C[:], num)
 		e.B = append(e.B, e.C[:uint64Size]...)
 	}
@@ -45,15 +50,12 @@ func (e *encbuf) MarshalString(s string) {
 	e.B = append(e.B, s...)
 }
 
-func (e *encbuf) MarshalUint8(b uint8) {
-	e.B = append(e.B, b)
-}
-
 var (
 	ErrInvalidSize = errors.New("invalid size")
 )
 
 // Decode Buffer
+
 type decbuf struct {
 	err error
 }
