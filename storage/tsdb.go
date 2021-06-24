@@ -93,7 +93,9 @@ func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) {
 			panic(err)
 		}
 
-		fmt.Printf("Ret: %+v\n", dps)
+		for _, dp := range dps {
+			fmt.Printf("Ret: %+v\n", dp)
+		}
 	}
 }
 

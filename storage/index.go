@@ -3,6 +3,8 @@ package storage
 import (
 	"strings"
 	"sync"
+
+	"github.com/RoaringBitmap/roaring"
 )
 
 // Memory Index
@@ -129,50 +131,19 @@ func (mim *memoryIndexMap) MatchSids(labels LabelSet) []string {
 // Disk Index
 
 type diskSidSet struct {
-	set map[uint32]struct{}
+	set *roaring.Bitmap
 	mut sync.Mutex
 }
 
 func newDiskSidSet() *diskSidSet {
-	return &diskSidSet{set: make(map[uint32]struct{})}
+	return &diskSidSet{set: roaring.New()}
 }
 
 func (dss *diskSidSet) Add(a uint32) {
 	dss.mut.Lock()
 	defer dss.mut.Unlock()
 
-	dss.set[a] = struct{}{}
-}
-
-func (dss *diskSidSet) Size() int {
-	dss.mut.Lock()
-	defer dss.mut.Unlock()
-
-	return len(dss.set)
-}
-
-func (dss *diskSidSet) Intersection(other *diskSidSet) {
-	dss.mut.Lock()
-	defer dss.mut.Unlock()
-
-	for k := range dss.set {
-		_, ok := other.set[k]
-		if !ok {
-			delete(dss.set, k)
-		}
-	}
-}
-
-func (dss *diskSidSet) List() []uint32 {
-	dss.mut.Lock()
-	defer dss.mut.Unlock()
-
-	keys := make([]uint32, 0, len(dss.set))
-	for k := range dss.set {
-		keys = append(keys, k)
-	}
-
-	return keys
+	dss.set.Add(a)
 }
 
 type diskIndexMap struct {
@@ -226,28 +197,27 @@ func (dim *diskIndexMap) MatchSids(labels LabelSet) []uint32 {
 	dim.mut.Lock()
 	defer dim.mut.Unlock()
 
-	sids := newDiskSidSet()
+	lst := make([]*roaring.Bitmap, 0)
 	for i := len(labels) - 1; i >= 0; i-- {
-		midx := dim.label2sids[labels[i].MarshalName()]
+		labelIdx := dim.label2sids[labels[i].MarshalName()]
 
 		if labels[i].Name == metricName {
 			// 匹配不到 metricName 则表明该 metric 不存在 直接返回
-			if midx == nil {
+			if labelIdx == nil {
 				return nil
 			}
 
-			// 从磁盘 chuck 是不可变的 所以 map 不会有更新操作 无需 copy
-			sids = midx
-			if sids.Size() <= 0 {
+			if labelIdx.set.IsEmpty() {
 				return nil
 			}
-			continue
+
+			lst = append(lst, labelIdx.set)
 		}
 
-		if midx != nil {
-			sids.Intersection(midx)
+		if labelIdx != nil {
+			lst = append(lst, labelIdx.set)
 		}
 	}
 
-	return sids.List()
+	return roaring.ParAnd(2, lst...).ToArray()
 }
