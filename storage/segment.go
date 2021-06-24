@@ -18,9 +18,16 @@ type Segment interface {
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
-	Marshal() ([]byte, []byte, error)
+	Marshal() ([]byte, []byte, []byte, error)
 	Type() SegmentType
 	Close() error
+}
+
+type Desc struct {
+	SeriesCount     int64 `json:"seriesCount"`
+	DataPointsCount int64 `json:"dataPointsCount"`
+	MaxTs           int64 `json:"maxTs"`
+	MinTs           int64 `json:"minTs"`
 }
 
 type SegmentList struct {

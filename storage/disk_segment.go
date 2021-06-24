@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-
 	"github.com/dgryski/go-tsz"
 
 	"github.com/chenjiandongx/mandodb/toolkit/mmap"
@@ -15,6 +14,9 @@ type diskSegment struct {
 
 	minTs int64
 	maxTs int64
+
+	seriesCount     int64
+	dataPointsCount int64
 }
 
 func newDiskSegment(mf *mmap.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
@@ -47,8 +49,8 @@ func (ds *diskSegment) Close() error {
 	return ds.mf.Close()
 }
 
-func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
-	return nil, nil, nil
+func (ds *diskSegment) Marshal() ([]byte, []byte, []byte, error) {
+	return nil, nil, nil, nil
 }
 
 func (ds *diskSegment) InsertRows(_ []*Row) {

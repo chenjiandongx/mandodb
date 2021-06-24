@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -15,6 +16,9 @@ type memorySegment struct {
 
 	minTs int64
 	maxTs int64
+
+	seriesCount     int64
+	dataPointsCount int64
 }
 
 func newMemorySegment() Segment {
@@ -29,6 +33,7 @@ func (ms *memorySegment) getOrCreateSeries(row *Row) *Series {
 		return v.(*Series)
 	}
 
+	atomic.AddInt64(&ms.seriesCount, 1)
 	newSeries := newSeries(row)
 	ms.segment.Store(row.ID(), newSeries)
 
@@ -80,6 +85,7 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		if atomic.LoadInt64(&ms.maxTs) < row.DataPoint.Ts {
 			atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
 		}
+		atomic.AddInt64(&ms.dataPointsCount, 1)
 		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
 	}
 }
@@ -100,7 +106,7 @@ func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]Metric
 	return ret, nil
 }
 
-func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
+func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 	sids := make(map[string]uint32)
 
 	startOffset := 0
@@ -150,50 +156,54 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 
 	metaBytes, err := MarshalMeta(meta)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return metaBytes, dataBuf, nil
+	desc := &Desc{
+		SeriesCount:     ms.seriesCount,
+		DataPointsCount: ms.dataPointsCount,
+		MaxTs:           ms.maxTs,
+		MinTs:           ms.minTs,
+	}
+
+	descBytes, _ := json.MarshalIndent(desc, "", "    ")
+
+	return metaBytes, dataBuf, descBytes, nil
 }
 
 func writeToDisk(segment Segment) (*Metadata, error) {
-	metaBytes, dataBytes, err := segment.Marshal()
+	metaBytes, dataBytes, descBytes, err := segment.Marshal()
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal segment: %s", err.Error())
 	}
 
+	writeFile := func(f string, data []byte) error {
+		if isFileExist(f) {
+			return fmt.Errorf("%s file is exist", f)
+		}
+
+		metaFd, err := os.OpenFile(f, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+		if err != nil {
+			return err
+		}
+		defer metaFd.Close()
+
+		_, err = metaFd.Write(data)
+		return err
+	}
+
 	prefix := filePrefix(segment.MinTs(), segment.MaxTs())
-	metaFile, dataFile := prefix+"meta", prefix+"data"
-
-	if isFileExist(metaFile) {
-		return nil, fmt.Errorf("%s meta file is exist", metaFile)
-	}
-	metaFd, err := os.OpenFile(metaFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
+	if err := writeFile(prefix+"meta", metaBytes); err != nil {
 		return nil, err
 	}
 
-	_, err = metaFd.Write(metaBytes)
-	if err != nil {
+	if err := writeFile(prefix+"data", dataBytes); err != nil {
 		return nil, err
 	}
 
-	defer metaFd.Close()
-
-	if isFileExist(dataFile) {
-		return nil, fmt.Errorf("%s data file is exist", dataFile)
-	}
-	dataFd, err := os.OpenFile(dataFile, os.O_CREATE|os.O_WRONLY, os.ModePerm)
-	if err != nil {
+	if err := writeFile(prefix+"json", descBytes); err != nil {
 		return nil, err
 	}
-
-	_, err = dataFd.Write(dataBytes)
-	if err != nil {
-		return nil, err
-	}
-
-	defer dataFd.Close()
 
 	md := Metadata{}
 	if err = UnmarshalMeta(metaBytes, &md); err != nil {
