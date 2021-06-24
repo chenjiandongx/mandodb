@@ -104,9 +104,9 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 }
 
 func (tsdb *TSDB) Close() {
-	for _, segment := range tsdb.segs.lst {
-		segment.Close()
-	}
+	//for _, segment := range tsdb.segs.lst {
+	//	segment.Close()
+	//}
 
 	tsdb.segs.head.Close()
 }

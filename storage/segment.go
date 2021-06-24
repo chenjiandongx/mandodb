@@ -2,7 +2,8 @@ package storage
 
 import (
 	"os"
-	"sort"
+
+	"github.com/chenjiandongx/mandodb/toolkit/avltree"
 )
 
 type SegmentType string
@@ -32,29 +33,19 @@ type Desc struct {
 
 type SegmentList struct {
 	head Segment
-	lst  []Segment
+	lst  *avltree.Tree
 }
 
 func newSegmentList() *SegmentList {
-	return &SegmentList{head: newMemorySegment()}
-}
-
-func (sl *SegmentList) Less(i, j int) bool {
-	return sl.lst[i].MaxTs() < sl.lst[j].MinTs()
-}
-
-func (sl *SegmentList) Len() int {
-	return len(sl.lst)
-}
-
-func (sl *SegmentList) Swap(i, j int) {
-	sl.lst[i], sl.lst[j] = sl.lst[j], sl.lst[i]
+	return &SegmentList{head: newMemorySegment(), lst: &avltree.Tree{}}
 }
 
 func (sl *SegmentList) Get(start, end int64) []Segment {
 	segs := make([]Segment, 0)
 
-	for _, seg := range sl.lst {
+	rows := sl.lst.All()
+	for i := 0; i < len(rows); i++ {
+		seg := rows[i].(Segment)
 		if sl.Choose(seg, start, end) {
 			segs = append(segs, seg)
 		}
@@ -85,12 +76,11 @@ func (sl *SegmentList) Choose(seg Segment, start, end int64) bool {
 }
 
 func (sl *SegmentList) Add(segment Segment) {
-	sl.lst = append(sl.lst, segment)
-	sort.Sort(sl)
+	sl.lst.Add(segment.MaxTs(), segment)
 }
 
 func (sl *SegmentList) Remove(segment Segment) {
-
+	sl.lst.Remove(segment.MinTs())
 }
 
 const metricName = "__name__"
