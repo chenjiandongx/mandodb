@@ -1,24 +1,31 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cespare/xxhash"
+	"github.com/chenjiandongx/logger"
 
-	"github.com/chenjiandongx/mandodb/toolkit/mmap"
+	"github.com/chenjiandongx/mandodb/lib/mmap"
 )
 
 // TODO: list
-// * 处理 Outdated 数据 -> skiplist
 // * 归档数据使用 snappy/zstd 压缩
 // * 磁盘文件合并 参考 leveldb
 // * WAL 做灾备
 
-const separator = "/-/"
+const (
+	separator         = "/-/"
+	defaultQSize      = 1 << 12
+	defaultWriteBatch = 1 << 9
+)
 
 type DataPoint struct {
 	Ts    int64
@@ -55,38 +62,113 @@ type MetricRet struct {
 type TSDB struct {
 	segs *SegmentList
 	mut  sync.Mutex
+
+	q chan []*Row
+
+	wg     sync.WaitGroup
+	worker chan struct{}
 }
 
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
-	// 加锁确保 head 的状态对外都是一致的
-	// TODO: 这个锁对性能影响太大了 得想办法优化
-	tsdb.mut.Lock()
-	if tsdb.segs.head.Frozen() {
-		prefix := filePrefix(tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs())
-		meta, err := writeToDisk(tsdb.segs.head)
-		if err != nil {
-			return fmt.Errorf("failed to flush data to disk, %v", err)
-		}
-
-		mf, err := mmap.OpenMmapFile(prefix + "data")
-		if err != nil {
-			return fmt.Errorf("failed to make a mmap file, %v", err)
-		}
-
-		tsdb.segs.Add(newDiskSegment(mf, meta, tsdb.segs.head.MinTs(), tsdb.segs.head.MaxTs()))
-		tsdb.segs.head = newMemorySegment()
+	select {
+	case tsdb.q <- rows:
 	}
-	tsdb.mut.Unlock()
 
-	tsdb.segs.head.InsertRows(rows)
 	return nil
 }
 
+func (tsdb *TSDB) insertRows() {
+	for {
+		tsdb.worker <- struct{}{}
+
+		go func() {
+			defer func() {
+				_ = <-tsdb.worker
+			}()
+
+			rows := make([]*Row, 0, defaultWriteBatch)
+			tick := time.Tick(200 * time.Millisecond)
+
+			n := 0
+			for {
+				select {
+				case rs := <-tsdb.q:
+					for i := 0; i < len(rs); i++ {
+						rows = append(rows, rs[i])
+					}
+
+					n += 1
+					if n >= defaultWriteBatch {
+						head, err := tsdb.getHeadPartition()
+						if err != nil {
+							logger.Errorf("failed to get head partition: %v", head)
+							continue
+						}
+
+						head.InsertRows(rows)
+						rows = rows[:0]
+						n = 0
+					}
+
+				case <-tick:
+					head, err := tsdb.getHeadPartition()
+					if err != nil {
+						logger.Errorf("failed to get head partition: %v", head)
+						continue
+					}
+
+					head.InsertRows(rows)
+					rows = rows[:0]
+				}
+			}
+		}()
+	}
+}
+
+func (tsdb *TSDB) getHeadPartition() (Segment, error) {
+	tsdb.mut.Lock()
+	defer tsdb.mut.Unlock()
+
+	if tsdb.segs.head.Frozen() {
+		head := tsdb.segs.head
+
+		go func() {
+			tsdb.wg.Add(1)
+			defer tsdb.wg.Done()
+
+			t0 := time.Now()
+			prefix := filePrefix(head.MinTs(), head.MaxTs())
+			_, err := writeToDisk(head)
+			if err != nil {
+				logger.Errorf("failed to flush data to disk, %v", err)
+				return
+			}
+
+			fname := prefix + "data"
+			mf, err := mmap.OpenMmapFile(fname)
+			if err != nil {
+				logger.Errorf("failed to make a mmap file %s, %v", fname, err)
+				return
+			}
+
+			tsdb.segs.Add(newDiskSegment(mf, prefix+"meta", head.MinTs(), head.MaxTs()))
+			logger.Infof("write file %s take: %v", fname, time.Since(t0))
+		}()
+
+		tsdb.segs.head = newMemorySegment()
+	}
+
+	return tsdb.segs.head, nil
+}
+
 func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) {
+	tsdb.wg.Wait()
+
 	labels = labels.AddMetricName(metric)
 
 	ret := tsdb.segs.Get(start, end)
 	for _, r := range ret {
+		r = r.Load()
 		fmt.Println("Query from:", r.Type())
 		dps, err := r.QueryRange(labels, start, end)
 		if err != nil {
@@ -104,9 +186,10 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 }
 
 func (tsdb *TSDB) Close() {
-	//for _, segment := range tsdb.segs.lst {
-	//	segment.Close()
-	//}
+	tsdb.wg.Wait()
+	for _, segment := range tsdb.segs.lst.All() {
+		segment.(Segment).Close()
+	}
 
 	tsdb.segs.head.Close()
 }
@@ -127,29 +210,31 @@ func (tsdb *TSDB) loadFiles() {
 			continue
 		}
 
-		if strings.HasSuffix(file.Name(), ".meta") {
+		if strings.HasSuffix(file.Name(), ".json") {
 			bs, err := ioutil.ReadFile(file.Name())
 			if err != nil {
-				panic(err)
-			}
-
-			meta := Metadata{}
-			if err := UnmarshalMeta(bs, &meta); err != nil {
+				logger.Errorf("failed to read file: %s, err: %v", file.Name(), err)
 				continue
 			}
 
-			datafname := strings.ReplaceAll(file.Name(), ".meta", ".data")
+			desc := Desc{}
+			if err := json.Unmarshal(bs, &desc); err != nil {
+				logger.Errorf("failed to unmarshal descfile: %v", err)
+				continue
+			}
+
+			datafname := strings.ReplaceAll(file.Name(), ".json", ".data")
 			mf, err := mmap.OpenMmapFile(datafname)
 			if err != nil {
-				panic(err)
+				logger.Errorf("failed to open mmapfile %s, err: %v", file.Name(), err)
+				continue
 			}
 
 			diskseg := &diskSegment{
-				mf:       mf,
-				indexMap: newDiskIndexMap(meta.Labels),
-				series:   meta.Series,
-				minTs:    meta.MinTs,
-				maxTs:    meta.MaxTs,
+				dataFd: mf,
+				metaF:  strings.ReplaceAll(file.Name(), ".json", ".meta"),
+				minTs:  desc.MinTs,
+				maxTs:  desc.MaxTs,
 			}
 			tsdb.segs.Add(diskseg)
 		}
@@ -157,8 +242,14 @@ func (tsdb *TSDB) loadFiles() {
 }
 
 func OpenTSDB() *TSDB {
-	tsdb := &TSDB{segs: newSegmentList()}
+	tsdb := &TSDB{
+		segs:   newSegmentList(),
+		q:      make(chan []*Row, defaultQSize),
+		worker: make(chan struct{}, runtime.GOMAXPROCS(-1)),
+	}
 	tsdb.loadFiles()
+
+	go tsdb.insertRows()
 
 	return tsdb
 }

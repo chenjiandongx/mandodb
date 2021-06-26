@@ -3,7 +3,7 @@ package storage
 import (
 	"os"
 
-	"github.com/chenjiandongx/mandodb/toolkit/avltree"
+	"github.com/chenjiandongx/mandodb/lib/avltree"
 )
 
 type SegmentType string
@@ -22,6 +22,7 @@ type Segment interface {
 	Marshal() ([]byte, []byte, []byte, error)
 	Type() SegmentType
 	Close() error
+	Load() Segment
 }
 
 type Desc struct {

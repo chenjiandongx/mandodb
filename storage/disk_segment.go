@@ -2,13 +2,20 @@ package storage
 
 import (
 	"bytes"
+	"io/ioutil"
+	"time"
+
+	"github.com/chenjiandongx/logger"
 	"github.com/dgryski/go-tsz"
 
-	"github.com/chenjiandongx/mandodb/toolkit/mmap"
+	"github.com/chenjiandongx/mandodb/lib/mmap"
 )
 
 type diskSegment struct {
-	mf       *mmap.MmapFile
+	dataFd *mmap.MmapFile
+	metaF  string
+	load   bool
+
 	indexMap *diskIndexMap
 	series   []metaSeries
 
@@ -19,13 +26,12 @@ type diskSegment struct {
 	dataPointsCount int64
 }
 
-func newDiskSegment(mf *mmap.MmapFile, meta *Metadata, minTs, maxTs int64) Segment {
+func newDiskSegment(mf *mmap.MmapFile, metaF string, minTs, maxTs int64) Segment {
 	return &diskSegment{
-		mf:       mf,
-		series:   meta.Series,
-		indexMap: newDiskIndexMap(meta.Labels),
-		minTs:    minTs,
-		maxTs:    maxTs,
+		dataFd: mf,
+		metaF:  metaF,
+		minTs:  minTs,
+		maxTs:  maxTs,
 	}
 }
 
@@ -46,7 +52,33 @@ func (ds *diskSegment) Type() SegmentType {
 }
 
 func (ds *diskSegment) Close() error {
-	return ds.mf.Close()
+	return ds.dataFd.Close()
+}
+
+func (ds *diskSegment) Load() Segment {
+	if ds.load {
+		return ds
+	}
+
+	t0 := time.Now()
+	bs, err := ioutil.ReadFile(ds.metaF)
+	if err != nil {
+		logger.Errorf("failed to read file %s: %v", ds.metaF, err)
+		return ds
+	}
+
+	meta := Metadata{}
+	if err := UnmarshalMeta(bs, &meta); err != nil {
+		logger.Errorf("failed to unmarshal meta: %v", err)
+		return ds
+	}
+
+	ds.indexMap = newDiskIndexMap(meta.Labels)
+	ds.series = meta.Series
+	ds.load = true
+
+	logger.Infof("load disk segment %s, take: %v", ds.metaF, time.Since(t0))
+	return ds
 }
 
 func (ds *diskSegment) Marshal() ([]byte, []byte, []byte, error) {
@@ -65,7 +97,7 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 		startOffset := ds.series[sid].StartOffset
 		endOffset := ds.series[sid].EndOffset
 
-		reader := bytes.NewReader(ds.mf.Bytes())
+		reader := bytes.NewReader(ds.dataFd.Bytes())
 		dataBytes := make([]byte, endOffset-startOffset)
 		_, err := reader.ReadAt(dataBytes, int64(startOffset))
 		if err != nil {

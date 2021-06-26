@@ -67,6 +67,10 @@ func (ms *memorySegment) Close() error {
 	return err
 }
 
+func (ms *memorySegment) Load() Segment {
+	return ms
+}
+
 func (ms *memorySegment) InsertRows(rows []*Row) {
 	for _, row := range rows {
 		row.Labels = row.Labels.AddMetricName(row.Metric)
