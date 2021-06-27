@@ -42,6 +42,15 @@ func (ls LabelSet) filter() LabelSet {
 	return ls[:size]
 }
 
+func (ls LabelSet) Map() map[string]string {
+	m := make(map[string]string)
+	for _, label := range ls {
+		m[label.Name] = label.Value
+	}
+
+	return m
+}
+
 func (ls LabelSet) Len() int           { return len(ls) }
 func (ls LabelSet) Less(i, j int) bool { return ls[i].Name < ls[j].Name }
 func (ls LabelSet) Swap(i, j int)      { ls[i], ls[j] = ls[j], ls[i] }

@@ -111,8 +111,7 @@ func (mim *memoryIndexMap) MatchSids(labels LabelSet) []string {
 			return nil
 		}
 
-		sids = midx.Copy()
-		if sids.Size() <= 0 {
+		if midx.Size() <= 0 {
 			return nil
 		}
 		sids.Intersection(midx.Copy())
