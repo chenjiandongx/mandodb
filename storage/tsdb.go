@@ -153,28 +153,47 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 	return tsdb.segs.head, nil
 }
 
-func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) {
+func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) ([]MetricRet, error) {
 	tsdb.wg.Wait()
 
 	labels = labels.AddMetricName(metric)
 
-	ret := tsdb.segs.Get(start, end)
-	for _, r := range ret {
-		r = r.Load()
-		fmt.Println("Query from:", r.Type())
-		dps, err := r.QueryRange(labels, start, end)
+	temp := make([]MetricRet, 0)
+	for _, segment := range tsdb.segs.Get(start, end) {
+		segment = segment.Load()
+		mret, err := segment.QueryRange(labels, start, end)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 
-		for _, dp := range dps {
-			fmt.Printf("Ret: %+v\n", dp)
-		}
+		temp = append(temp, mret...)
 	}
+
+	return tsdb.MergeResult(temp...), nil
 }
 
 func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
-	return nil
+	metrics := make(map[uint64]*MetricRet)
+	for _, r := range ret {
+		h := LabelSet(r.Labels).Hash()
+		v, ok := metrics[h]
+		if !ok {
+			metrics[h] = &MetricRet{
+				Labels:     r.Labels,
+				DataPoints: r.DataPoints,
+			}
+			continue
+		}
+
+		v.DataPoints = append(v.DataPoints, r.DataPoints...)
+	}
+
+	items := make([]MetricRet, 0, len(metrics))
+	for _, v := range metrics {
+		items = append(items, *v)
+	}
+
+	return items
 }
 
 func (tsdb *TSDB) Close() {
@@ -243,9 +262,7 @@ func OpenTSDB() *TSDB {
 	tsdb.loadFiles()
 
 	worker := runtime.GOMAXPROCS(-1)
-	ctx, cancel := context.WithCancel(context.Background())
-	tsdb.ctx = ctx
-	tsdb.cancel = cancel
+	tsdb.ctx, tsdb.cancel = context.WithCancel(context.Background())
 
 	for i := 0; i < worker; i++ {
 		go tsdb.ingestRows(tsdb.ctx)
