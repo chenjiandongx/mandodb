@@ -190,6 +190,9 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 
 	items := make([]MetricRet, 0, len(metrics))
 	for _, v := range metrics {
+		sort.Slice(v.DataPoints, func(i, j int) bool {
+			return v.DataPoints[i].Ts < v.DataPoints[j].Ts
+		})
 		items = append(items, *v)
 	}
 
@@ -210,7 +213,7 @@ func (tsdb *TSDB) Close() {
 func (tsdb *TSDB) loadFiles() {
 	files, err := ioutil.ReadDir(".")
 	if err != nil {
-		panic(err)
+		panic("BUG: failed to load data storage, error: " + err.Error())
 	}
 
 	// 确保文件按时间排序
