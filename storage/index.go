@@ -107,22 +107,15 @@ func (mim *memoryIndexMap) MatchSids(labels LabelSet) []string {
 	for i := len(labels) - 1; i >= 0; i-- {
 		midx := mim.idx[labels[i].MarshalName()]
 
-		if labels[i].Name == metricName {
-			// 匹配不到 metricName 则表明该 metric 不存在 直接返回
-			if midx == nil {
-				return nil
-			}
-
-			sids = midx.Copy()
-			if sids.Size() <= 0 {
-				return nil
-			}
-			continue
+		if midx == nil {
+			return nil
 		}
 
-		if midx != nil {
-			sids.Intersection(midx.Copy())
+		sids = midx.Copy()
+		if sids.Size() <= 0 {
+			return nil
 		}
+		sids.Intersection(midx.Copy())
 	}
 
 	return sids.List()
@@ -201,22 +194,15 @@ func (dim *diskIndexMap) MatchSids(labels LabelSet) []uint32 {
 	for i := len(labels) - 1; i >= 0; i-- {
 		labelIdx := dim.label2sids[labels[i].MarshalName()]
 
-		if labels[i].Name == metricName {
-			// 匹配不到 metricName 则表明该 metric 不存在 直接返回
-			if labelIdx == nil {
-				return nil
-			}
-
-			if labelIdx.set.IsEmpty() {
-				return nil
-			}
-
-			lst = append(lst, labelIdx.set)
+		if labelIdx == nil {
+			return nil
 		}
 
-		if labelIdx != nil {
-			lst = append(lst, labelIdx.set)
+		if labelIdx.set.IsEmpty() {
+			return nil
 		}
+
+		lst = append(lst, labelIdx.set)
 	}
 
 	return roaring.ParAnd(2, lst...).ToArray()
