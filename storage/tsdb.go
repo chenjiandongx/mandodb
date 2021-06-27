@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -23,8 +24,8 @@ import (
 
 const (
 	separator         = "/-/"
-	defaultQSize      = 1 << 12
-	defaultWriteBatch = 1 << 9
+	defaultQSize      = 128
+	defaultWriteBatch = 256
 )
 
 type DataPoint struct {
@@ -63,10 +64,11 @@ type TSDB struct {
 	segs *SegmentList
 	mut  sync.Mutex
 
-	q chan []*Row
+	ctx    context.Context
+	cancel context.CancelFunc
 
-	wg     sync.WaitGroup
-	worker chan struct{}
+	q  chan []*Row
+	wg sync.WaitGroup
 }
 
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
@@ -77,51 +79,41 @@ func (tsdb *TSDB) InsertRows(rows []*Row) error {
 	return nil
 }
 
-func (tsdb *TSDB) insertRows() {
+func (tsdb *TSDB) ingestRows(ctx context.Context) {
+	rows := make([]*Row, 0, defaultWriteBatch)
+	tick := time.Tick(200 * time.Millisecond)
+
 	for {
-		tsdb.worker <- struct{}{}
+		select {
+		case <-ctx.Done():
+			return
 
-		go func() {
-			defer func() {
-				_ = <-tsdb.worker
-			}()
-
-			rows := make([]*Row, 0, defaultWriteBatch)
-			tick := time.Tick(200 * time.Millisecond)
-
-			n := 0
-			for {
-				select {
-				case rs := <-tsdb.q:
-					for i := 0; i < len(rs); i++ {
-						rows = append(rows, rs[i])
-					}
-
-					n += 1
-					if n >= defaultWriteBatch {
-						head, err := tsdb.getHeadPartition()
-						if err != nil {
-							logger.Errorf("failed to get head partition: %v", head)
-							continue
-						}
-
-						head.InsertRows(rows)
-						rows = rows[:0]
-						n = 0
-					}
-
-				case <-tick:
-					head, err := tsdb.getHeadPartition()
-					if err != nil {
-						logger.Errorf("failed to get head partition: %v", head)
-						continue
-					}
-
-					head.InsertRows(rows)
-					rows = rows[:0]
-				}
+		case rs := <-tsdb.q:
+			for i := 0; i < len(rs); i++ {
+				rows = append(rows, rs[i])
 			}
-		}()
+
+			if len(rows) >= defaultWriteBatch {
+				head, err := tsdb.getHeadPartition()
+				if err != nil {
+					logger.Errorf("failed to get head partition: %v", head)
+					continue
+				}
+
+				head.InsertRows(rows)
+				rows = rows[:0]
+			}
+
+		case <-tick:
+			head, err := tsdb.getHeadPartition()
+			if err != nil {
+				logger.Errorf("failed to get head partition: %v", head)
+				continue
+			}
+
+			head.InsertRows(rows)
+			rows = rows[:0]
+		}
 	}
 }
 
@@ -187,6 +179,8 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 
 func (tsdb *TSDB) Close() {
 	tsdb.wg.Wait()
+	tsdb.cancel()
+
 	for _, segment := range tsdb.segs.lst.All() {
 		segment.(Segment).Close()
 	}
@@ -243,13 +237,19 @@ func (tsdb *TSDB) loadFiles() {
 
 func OpenTSDB() *TSDB {
 	tsdb := &TSDB{
-		segs:   newSegmentList(),
-		q:      make(chan []*Row, defaultQSize),
-		worker: make(chan struct{}, runtime.GOMAXPROCS(-1)),
+		segs: newSegmentList(),
+		q:    make(chan []*Row, defaultQSize),
 	}
 	tsdb.loadFiles()
 
-	go tsdb.insertRows()
+	worker := runtime.GOMAXPROCS(-1)
+	ctx, cancel := context.WithCancel(context.Background())
+	tsdb.ctx = ctx
+	tsdb.cancel = cancel
+
+	for i := 0; i < worker; i++ {
+		go tsdb.ingestRows(tsdb.ctx)
+	}
 
 	return tsdb
 }
