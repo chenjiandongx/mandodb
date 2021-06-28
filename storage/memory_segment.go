@@ -14,6 +14,8 @@ type memorySegment struct {
 	segment  sync.Map
 	indexMap *memoryIndexMap
 
+	labelVs *labelValueSet
+
 	minTs int64
 	maxTs int64
 
@@ -21,9 +23,43 @@ type memorySegment struct {
 	dataPointsCount int64
 }
 
+type labelValueSet struct {
+	mut    sync.Mutex
+	values map[string]map[string]struct{}
+}
+
+func (lvs *labelValueSet) Set(label, value string) {
+	lvs.mut.Lock()
+	defer lvs.mut.Unlock()
+
+	if _, ok := lvs.values[label]; !ok {
+		lvs.values[label] = make(map[string]struct{})
+	}
+
+	lvs.values[label][value] = struct{}{}
+}
+
+func (lvs *labelValueSet) Get(label string) []string {
+	lvs.mut.Lock()
+	defer lvs.mut.Unlock()
+
+	ret := make([]string, 0)
+	vs, ok := lvs.values[label]
+	if !ok {
+		return ret
+	}
+
+	for k := range vs {
+		ret = append(ret, k)
+	}
+
+	return ret
+}
+
 func newMemorySegment() Segment {
 	return &memorySegment{
 		indexMap: newMemoryIndexMap(),
+		labelVs:  &labelValueSet{values: make(map[string]map[string]struct{})},
 	}
 }
 
@@ -53,7 +89,12 @@ func (ms *memorySegment) Frozen() bool {
 	return ms.MaxTs()-ms.MinTs() >= 3600
 }
 
+func (ms *memorySegment) LabelValues(label string) []string {
+	return ms.labelVs.Get(label)
+}
+
 func (ms *memorySegment) Type() SegmentType {
+
 	return MemorySegmentType
 }
 
@@ -73,6 +114,11 @@ func (ms *memorySegment) Load() Segment {
 
 func (ms *memorySegment) InsertRows(rows []*Row) {
 	for _, row := range rows {
+		ms.labelVs.Set(metricName, row.Metric)
+		for _, label := range row.Labels {
+			ms.labelVs.Set(label.Name, label.Value)
+		}
+
 		row.Labels = row.Labels.AddMetricName(row.Metric)
 		series := ms.getOrCreateSeries(row)
 
@@ -92,6 +138,19 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		atomic.AddInt64(&ms.dataPointsCount, 1)
 		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
 	}
+}
+
+func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
+	matchSids := ms.indexMap.MatchSids(labels)
+	ret := make([]LabelSet, 0)
+	for _, sid := range matchSids {
+		b, _ := ms.segment.Load(sid)
+		series := b.(*Series)
+
+		ret = append(ret, series.labels)
+	}
+
+	return ret, nil
 }
 
 func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {

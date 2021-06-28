@@ -16,10 +16,12 @@ const (
 type Segment interface {
 	InsertRows(row []*Row)
 	QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error)
+	QuerySeries(labels LabelSet) ([]LabelSet, error)
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
 	Marshal() ([]byte, []byte, []byte, error)
+	LabelValues(string) []string
 	Type() SegmentType
 	Close() error
 	Load() Segment

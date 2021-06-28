@@ -7,16 +7,12 @@ import (
 	"io/ioutil"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/VictoriaMetrics/metricsql"
 	"github.com/cespare/xxhash"
 	"github.com/chenjiandongx/logger"
-	"github.com/gofiber/fiber/v2"
-
 	"github.com/chenjiandongx/mandodb/lib/mmap"
 )
 
@@ -78,101 +74,6 @@ type TSDB struct {
 	q  chan []*Row
 	wg sync.WaitGroup
 }
-
-type server struct {
-	app *fiber.App
-	ref *TSDB
-}
-
-func newServer() *server {
-	return &server{app: fiber.New()}
-}
-
-func (s *server) Run(addr string) error {
-	apiv1 := s.app.Group("/api/v1")
-
-	apiv1.Post("/query_range", s.queryRange)
-	return s.app.Listen(addr)
-}
-
-// api/v1/query_range --> start
-
-func (s *server) queryRange(c *fiber.Ctx) error {
-	expr, err := metricsql.Parse(c.FormValue("query"))
-	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
-	}
-
-	me, ok := expr.(*metricsql.MetricExpr)
-	if !ok {
-		return c.JSON(qrResponse{Status: "error"})
-	}
-
-	labels := make([]Label, 0)
-	var metric string
-
-	for _, label := range me.LabelFilters {
-		if label.Label == "__name__" {
-			metric = label.Value
-			continue
-		}
-
-		labels = append(labels, Label{Name: label.Label, Value: label.Value})
-	}
-
-	start, err := strconv.ParseInt(c.FormValue("start"), 10, 64)
-	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
-	}
-	end, err := strconv.ParseInt(c.FormValue("end"), 10, 64)
-	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
-	}
-
-	ret, err := s.ref.QueryRange(metric, labels, start, end)
-	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
-	}
-
-	return c.JSON(qrResponse{Status: "success", Data: convert2QueryRangeData(ret)})
-}
-
-type qrResponse struct {
-	Status string `json:"status"`
-	Data   qrData `json:"data"`
-}
-
-type qrData struct {
-	ResultType string         `json:"resultType"`
-	Result     []qrDataResult `json:"result"`
-}
-
-type qrDataResult struct {
-	Metric map[string]string `json:"metric"`
-	Value  [][2]interface{}  `json:"values"`
-}
-
-func convert2QueryRangeData(met []MetricRet) qrData {
-	data := qrData{ResultType: "matrix"}
-
-	items := make([]qrDataResult, 0)
-	for _, m := range met {
-		item := qrDataResult{
-			Metric: LabelSet(m.Labels).Map(),
-		}
-
-		for _, dp := range m.DataPoints {
-			item.Value = append(item.Value, dp.ToInterface())
-		}
-
-		items = append(items, item)
-	}
-
-	data.Result = items
-	return data
-}
-
-// api/v1/query_range <-- end
 
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
 	select {
@@ -264,18 +165,18 @@ func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) (
 	temp := make([]MetricRet, 0)
 	for _, segment := range tsdb.segs.Get(start, end) {
 		segment = segment.Load()
-		mret, err := segment.QueryRange(labels, start, end)
+		data, err := segment.QueryRange(labels, start, end)
 		if err != nil {
 			return nil, err
 		}
 
-		temp = append(temp, mret...)
+		temp = append(temp, data...)
 	}
 
-	return tsdb.MergeResult(temp...), nil
+	return tsdb.MergeQueryRangeResult(temp...), nil
 }
 
-func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
+func (tsdb *TSDB) MergeQueryRangeResult(ret ...MetricRet) []MetricRet {
 	metrics := make(map[uint64]*MetricRet)
 	for _, r := range ret {
 		h := LabelSet(r.Labels).Hash()
@@ -300,6 +201,41 @@ func (tsdb *TSDB) MergeResult(ret ...MetricRet) []MetricRet {
 	}
 
 	return items
+}
+
+func (tsdb *TSDB) QuerySeries(labels LabelSet, start, end int64) ([]map[string]string, error) {
+	tsdb.wg.Wait()
+
+	temp := make([]LabelSet, 0)
+	for _, segment := range tsdb.segs.Get(start, end) {
+		segment = segment.Load()
+		data, err := segment.QuerySeries(labels)
+		if err != nil {
+			return nil, err
+		}
+
+		temp = append(temp, data...)
+	}
+
+	return tsdb.MergeQuerySeriesResult(temp...), nil
+}
+
+func (tsdb *TSDB) MergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
+	lbs := make(map[uint64]LabelSet)
+	for _, r := range ret {
+		lbs[r.Hash()] = r
+	}
+
+	items := make([]map[string]string, 0)
+	for _, lb := range lbs {
+		items = append(items, lb.Map())
+	}
+
+	return items
+}
+
+func (tsdb *TSDB) QueryLabelValues(label string) []string {
+	return tsdb.segs.head.LabelValues(label)
 }
 
 func (tsdb *TSDB) Close() {

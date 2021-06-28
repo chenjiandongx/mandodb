@@ -85,8 +85,23 @@ func (ds *diskSegment) Marshal() ([]byte, []byte, []byte, error) {
 	return nil, nil, nil, nil
 }
 
+func (ds *diskSegment) LabelValues(_ string) []string {
+	return nil
+}
+
 func (ds *diskSegment) InsertRows(_ []*Row) {
 	panic("BUG: disk segments are not mutable")
+}
+
+func (ds *diskSegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
+	sids := ds.indexMap.MatchSids(labels)
+	ret := make([]LabelSet, 0)
+
+	for _, sid := range sids {
+		ret = append(ret, ds.indexMap.MatchLabels(ds.series[sid].Labels...))
+	}
+
+	return ret, nil
 }
 
 func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
