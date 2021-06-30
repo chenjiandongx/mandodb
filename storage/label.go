@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/cespare/xxhash"
@@ -22,6 +23,54 @@ type Label struct {
 
 func (l Label) MarshalName() string {
 	return joinSeparator(l.Name, l.Value)
+}
+
+func unmarshalLabelName(s string) (string, string) {
+	pair := strings.SplitN(s, separator, 2)
+	if len(pair) != 2 {
+		return "", ""
+	}
+
+	return pair[0], pair[1]
+}
+
+type labelValueSet struct {
+	mut    sync.Mutex
+	values map[string]map[string]struct{}
+}
+
+func newLabelValueSet() *labelValueSet {
+	return &labelValueSet{
+		values: map[string]map[string]struct{}{},
+	}
+}
+
+func (lvs *labelValueSet) Set(label, value string) {
+	lvs.mut.Lock()
+	defer lvs.mut.Unlock()
+
+	if _, ok := lvs.values[label]; !ok {
+		lvs.values[label] = make(map[string]struct{})
+	}
+
+	lvs.values[label][value] = struct{}{}
+}
+
+func (lvs *labelValueSet) Get(label string) []string {
+	lvs.mut.Lock()
+	defer lvs.mut.Unlock()
+
+	ret := make([]string, 0)
+	vs, ok := lvs.values[label]
+	if !ok {
+		return ret
+	}
+
+	for k := range vs {
+		ret = append(ret, k)
+	}
+
+	return ret
 }
 
 type LabelSet []Label

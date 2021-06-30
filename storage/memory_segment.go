@@ -23,43 +23,10 @@ type memorySegment struct {
 	dataPointsCount int64
 }
 
-type labelValueSet struct {
-	mut    sync.Mutex
-	values map[string]map[string]struct{}
-}
-
-func (lvs *labelValueSet) Set(label, value string) {
-	lvs.mut.Lock()
-	defer lvs.mut.Unlock()
-
-	if _, ok := lvs.values[label]; !ok {
-		lvs.values[label] = make(map[string]struct{})
-	}
-
-	lvs.values[label][value] = struct{}{}
-}
-
-func (lvs *labelValueSet) Get(label string) []string {
-	lvs.mut.Lock()
-	defer lvs.mut.Unlock()
-
-	ret := make([]string, 0)
-	vs, ok := lvs.values[label]
-	if !ok {
-		return ret
-	}
-
-	for k := range vs {
-		ret = append(ret, k)
-	}
-
-	return ret
-}
-
 func newMemorySegment() Segment {
 	return &memorySegment{
 		indexMap: newMemoryIndexMap(),
-		labelVs:  &labelValueSet{values: make(map[string]map[string]struct{})},
+		labelVs:  newLabelValueSet(),
 	}
 }
 
@@ -89,7 +56,7 @@ func (ms *memorySegment) Frozen() bool {
 	return ms.MaxTs()-ms.MinTs() >= 3600
 }
 
-func (ms *memorySegment) LabelValues(label string) []string {
+func (ms *memorySegment) QueryLabelValues(label string) []string {
 	return ms.labelVs.Get(label)
 }
 
@@ -204,7 +171,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 
 	labelIdx := make([]seriesWithLabel, 0)
 
-	// key: Label.String()
+	// key: Label.MarshalName()
 	// value: sids...
 	ms.indexMap.Range(func(key string, value *memorySidSet) {
 		l := make([]uint32, 0)

@@ -25,13 +25,26 @@ func (s *server) Run(addr string) error {
 	return s.app.Listen(addr)
 }
 
+func tryInt64(s string) (int64, error) {
+	return strconv.ParseInt(s, 10, 64)
+}
+
 type qlResponse struct {
 	Status string   `json:"status"`
 	Data   []string `json:"data"`
 }
 
 func (s *server) queryLabelValues(c *fiber.Ctx) error {
-	metrics := s.ref.QueryLabelValues(c.Params("name"))
+	start, err := tryInt64(c.FormValue("start"))
+	if err != nil {
+		return c.JSON(qsResponse{Status: "error"})
+	}
+	end, err := tryInt64(c.FormValue("end"))
+	if err != nil {
+		return c.JSON(qsResponse{Status: "error"})
+	}
+
+	metrics := s.ref.QueryLabelValues(c.Params("name"), start, end)
 	return c.JSON(qlResponse{Status: "success", Data: metrics})
 }
 
@@ -51,11 +64,11 @@ func (s *server) querySeries(c *fiber.Ctx) error {
 		return c.JSON(qsResponse{Status: "error"})
 	}
 
-	start, err := strconv.ParseInt(c.FormValue("start"), 10, 64)
+	start, err := tryInt64(c.FormValue("start"))
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
 	}
-	end, err := strconv.ParseInt(c.FormValue("end"), 10, 64)
+	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
 	}
@@ -131,11 +144,11 @@ func (s *server) queryRange(c *fiber.Ctx) error {
 		labels = append(labels, Label{Name: label.Label, Value: label.Value})
 	}
 
-	start, err := strconv.ParseInt(c.FormValue("start"), 10, 64)
+	start, err := tryInt64(c.FormValue("start"))
 	if err != nil {
 		return c.JSON(qrResponse{Status: "error"})
 	}
-	end, err := strconv.ParseInt(c.FormValue("end"), 10, 64)
+	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
 		return c.JSON(qrResponse{Status: "error"})
 	}

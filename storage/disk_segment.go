@@ -16,6 +16,7 @@ type diskSegment struct {
 	metaF  string
 	load   bool
 
+	labelVs  *labelValueSet
 	indexMap *diskIndexMap
 	series   []metaSeries
 
@@ -28,10 +29,11 @@ type diskSegment struct {
 
 func newDiskSegment(mf *mmap.MmapFile, metaF string, minTs, maxTs int64) Segment {
 	return &diskSegment{
-		dataFd: mf,
-		metaF:  metaF,
-		minTs:  minTs,
-		maxTs:  maxTs,
+		dataFd:  mf,
+		metaF:   metaF,
+		minTs:   minTs,
+		maxTs:   maxTs,
+		labelVs: newLabelValueSet(),
 	}
 }
 
@@ -73,6 +75,13 @@ func (ds *diskSegment) Load() Segment {
 		return ds
 	}
 
+	for _, label := range meta.Labels {
+		k, v := unmarshalLabelName(label.Name)
+		if k != "" && v != "" {
+			ds.labelVs.Set(k, v)
+		}
+	}
+
 	ds.indexMap = newDiskIndexMap(meta.Labels)
 	ds.series = meta.Series
 	ds.load = true
@@ -85,8 +94,8 @@ func (ds *diskSegment) Marshal() ([]byte, []byte, []byte, error) {
 	return nil, nil, nil, nil
 }
 
-func (ds *diskSegment) LabelValues(_ string) []string {
-	return nil
+func (ds *diskSegment) QueryLabelValues(label string) []string {
+	return ds.labelVs.Get(label)
 }
 
 func (ds *diskSegment) InsertRows(_ []*Row) {

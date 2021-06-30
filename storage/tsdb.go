@@ -234,8 +234,23 @@ func (tsdb *TSDB) MergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
 	return items
 }
 
-func (tsdb *TSDB) QueryLabelValues(label string) []string {
-	return tsdb.segs.head.LabelValues(label)
+func (tsdb *TSDB) QueryLabelValues(label string, start, end int64) []string {
+	temp := make(map[string]struct{})
+	for _, segment := range tsdb.segs.Get(start, end) {
+		values := segment.QueryLabelValues(label)
+		for i := 0; i < len(values); i++ {
+			temp[values[i]] = struct{}{}
+		}
+	}
+
+	ret := make([]string, 0, len(temp))
+	for k := range temp {
+		ret = append(ret, k)
+	}
+
+	sort.Strings(ret)
+
+	return ret
 }
 
 func (tsdb *TSDB) Close() {
@@ -286,10 +301,11 @@ func (tsdb *TSDB) loadFiles() {
 			}
 
 			diskseg := &diskSegment{
-				dataFd: mf,
-				metaF:  strings.ReplaceAll(file.Name(), ".json", ".meta"),
-				minTs:  desc.MinTs,
-				maxTs:  desc.MaxTs,
+				dataFd:  mf,
+				metaF:   strings.ReplaceAll(file.Name(), ".json", ".meta"),
+				minTs:   desc.MinTs,
+				maxTs:   desc.MaxTs,
+				labelVs: newLabelValueSet(),
 			}
 			tsdb.segs.Add(diskseg)
 		}
