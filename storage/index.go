@@ -226,6 +226,10 @@ func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []uint32
 		}
 
 		union := roaring.ParOr(2, temp...)
+		if union.IsEmpty() {
+			return nil
+		}
+
 		lst = append(lst, union)
 	}
 
