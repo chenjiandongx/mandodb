@@ -20,6 +20,10 @@ type BytesCompressor interface {
 
 type noopBytesCompressor struct{}
 
+func newNoopBytesCompressor() BytesCompressor {
+	return &noopBytesCompressor{}
+}
+
 func (c *noopBytesCompressor) Compress(src []byte) []byte {
 	return src
 }
@@ -29,6 +33,10 @@ func (c *noopBytesCompressor) Decompress(src []byte) ([]byte, error) {
 }
 
 type zstdBytesCompressor struct{}
+
+func newZstdBytesCompressor() BytesCompressor {
+	return &zstdBytesCompressor{}
+}
 
 func (c *zstdBytesCompressor) Compress(src []byte) []byte {
 	var encoder, _ = zstd.NewWriter(nil)
@@ -41,6 +49,10 @@ func (c *zstdBytesCompressor) Decompress(src []byte) ([]byte, error) {
 }
 
 type snappyBytesCompressor struct{}
+
+func newSnappyBytesCompressor() BytesCompressor {
+	return &snappyBytesCompressor{}
+}
 
 func (c *snappyBytesCompressor) Compress(src []byte) []byte {
 	return snappy.Encode(nil, src)

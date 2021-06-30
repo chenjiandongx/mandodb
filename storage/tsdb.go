@@ -27,8 +27,8 @@ type tsdbOptions struct {
 }
 
 var globalOpts = &tsdbOptions{
-	metaSerializer:  &binaryMetaSerializer{},
-	bytesCompressor: &zstdBytesCompressor{},
+	metaSerializer:  newBinaryMetaSerializer(),
+	bytesCompressor: newZstdBytesCompressor(),
 }
 
 type Option func(c *tsdbOptions)
@@ -37,7 +37,7 @@ func WithMetaSerializerType(t MetaSerializerType) Option {
 	return func(c *tsdbOptions) {
 		switch t {
 		default: // binary
-			c.metaSerializer = &binaryMetaSerializer{}
+			c.metaSerializer = newBinaryMetaSerializer()
 		}
 	}
 }
@@ -46,11 +46,11 @@ func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 	return func(c *tsdbOptions) {
 		switch t {
 		case NoopBytesCompressor:
-			c.bytesCompressor = &noopBytesCompressor{}
+			c.bytesCompressor = newNoopBytesCompressor()
 		case SnappyBytesCompressor:
-			c.bytesCompressor = &snappyBytesCompressor{}
+			c.bytesCompressor = newSnappyBytesCompressor()
 		default: // zstd
-			c.bytesCompressor = &zstdBytesCompressor{}
+			c.bytesCompressor = newZstdBytesCompressor()
 		}
 	}
 }
