@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"net/http"
 	"strconv"
 
 	"github.com/VictoriaMetrics/metricsql"
@@ -99,6 +100,7 @@ func (s *server) querySeries(c *fiber.Ctx) error {
 type qrResponse struct {
 	Status string `json:"status"`
 	Data   qrData `json:"data"`
+	Msg    string `json:"msg"`
 }
 
 type qrData struct {
@@ -134,7 +136,10 @@ func convert2QueryRangeData(met []MetricRet) qrData {
 func (s *server) queryRange(c *fiber.Ctx) error {
 	expr, err := metricsql.Parse(c.FormValue("query"))
 	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
+		return c.Status(http.StatusBadRequest).JSON(qrResponse{
+			Status: "error",
+			Msg:    "invalid query param",
+		})
 	}
 
 	me, ok := expr.(*metricsql.MetricExpr)
@@ -144,12 +149,18 @@ func (s *server) queryRange(c *fiber.Ctx) error {
 
 	start, err := tryInt64(c.FormValue("start"))
 	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
+		return c.Status(http.StatusBadRequest).JSON(qrResponse{
+			Status: "error",
+			Msg:    "invalid start param",
+		})
 	}
 
 	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
-		return c.JSON(qrResponse{Status: "error"})
+		return c.Status(http.StatusBadRequest).JSON(qrResponse{
+			Status: "error",
+			Msg:    "invalid end param",
+		})
 	}
 
 	labels := make([]Label, 0)

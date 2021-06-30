@@ -21,6 +21,40 @@ import (
 // * 磁盘文件合并 参考 leveldb
 // * WAL 做灾备
 
+type tsdbOptions struct {
+	metaSerializer  MetaSerializer
+	bytesCompressor BytesCompressor
+}
+
+var globalOpts = &tsdbOptions{
+	metaSerializer:  &binaryMetaSerializer{},
+	bytesCompressor: &zstdBytesCompressor{},
+}
+
+type Option func(c *tsdbOptions)
+
+func WithMetaSerializerType(t MetaSerializerType) Option {
+	return func(c *tsdbOptions) {
+		switch t {
+		default: // binary
+			c.metaSerializer = &binaryMetaSerializer{}
+		}
+	}
+}
+
+func WithMetaBytesCompressorType(t BytesCompressorType) Option {
+	return func(c *tsdbOptions) {
+		switch t {
+		case NoopBytesCompressor:
+			c.bytesCompressor = &noopBytesCompressor{}
+		case SnappyBytesCompressor:
+			c.bytesCompressor = &snappyBytesCompressor{}
+		default: // zstd
+			c.bytesCompressor = &zstdBytesCompressor{}
+		}
+	}
+}
+
 const (
 	separator         = "/-/"
 	defaultQSize      = 128
@@ -155,6 +189,16 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 	}
 
 	return tsdb.segs.head, nil
+}
+
+type QueryRangeOptions struct {
+	Metric  string   `json:"metric"`
+	Labels  LabelSet `json:"labels"`
+	Agg     string   `json:"agg"`
+	GroupBy string   `json:"groupBy"`
+	Start   int64    `json:"start"`
+	End     int64    `json:"end"`
+	Step    string   `json:"step"`
 }
 
 func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) ([]MetricRet, error) {

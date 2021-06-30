@@ -4,22 +4,6 @@ import (
 	"sort"
 )
 
-type MetaSerializerType int8
-
-const (
-	BinaryMetaSerializer MetaSerializerType = iota
-)
-
-var defaultMetaSerializer = &binaryMetaSerializer{}
-
-func MarshalMeta(meta Metadata) ([]byte, error) {
-	return defaultMetaSerializer.Marshal(meta)
-}
-
-func UnmarshalMeta(data []byte, meta *Metadata) error {
-	return defaultMetaSerializer.Unmarshal(data, meta)
-}
-
 type metaSeries struct {
 	Sid         string
 	StartOffset uint64
@@ -41,12 +25,24 @@ type Metadata struct {
 	sidRelatedLabels []LabelSet
 }
 
+type MetaSerializerType int8
+
+const (
+	BinaryMetaSerializer MetaSerializerType = iota
+)
+
 type MetaSerializer interface {
 	Marshal(Metadata) ([]byte, error)
 	Unmarshal([]byte, *Metadata) error
 }
 
-type binaryMetaSerializer struct{}
+func MarshalMeta(meta Metadata) ([]byte, error) {
+	return globalOpts.metaSerializer.Marshal(meta)
+}
+
+func UnmarshalMeta(data []byte, meta *Metadata) error {
+	return globalOpts.metaSerializer.Unmarshal(data, meta)
+}
 
 const (
 	endOfBlock uint8 = 0xff
@@ -57,6 +53,8 @@ const (
 
 	magic = "https://github.com/chenjiandongx/mandodb"
 )
+
+type binaryMetaSerializer struct{}
 
 func newBinaryMetaSerializer() MetaSerializer {
 	return &binaryMetaSerializer{}
@@ -98,10 +96,15 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	encf.MarshalUint64(uint64(meta.MaxTs))
 	encf.MarshalString(magic)
 
-	return encf.Bytes(), nil
+	return globalOpts.bytesCompressor.Compress(encf.Bytes()), nil
 }
 
 func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
+	data, err := globalOpts.bytesCompressor.Decompress(data)
+	if err != nil {
+		return ErrInvalidSize
+	}
+
 	if len(data) < len(magic) {
 		return ErrInvalidSize
 	}

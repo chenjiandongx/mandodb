@@ -155,7 +155,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 		series := value.(*Series)
 		meta.sidRelatedLabels = append(meta.sidRelatedLabels, series.labels)
 
-		dataBytes := series.store.Bytes()
+		dataBytes := globalOpts.bytesCompressor.Compress(series.store.Bytes())
 		dataBuf = append(dataBuf, dataBytes...)
 
 		endOffset := startOffset + len(dataBytes)

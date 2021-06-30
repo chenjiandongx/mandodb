@@ -128,6 +128,11 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 			return nil, err
 		}
 
+		dataBytes, err = globalOpts.bytesCompressor.Decompress(dataBytes)
+		if err != nil {
+			return nil, err
+		}
+
 		iter, err := tsz.NewIterator(dataBytes)
 		if err != nil {
 			return nil, err
