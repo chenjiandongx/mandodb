@@ -56,6 +56,15 @@ func (mss *memorySidSet) Intersection(other *memorySidSet) {
 	}
 }
 
+func (mss *memorySidSet) Union(other *memorySidSet) {
+	mss.mut.Lock()
+	defer mss.mut.Unlock()
+
+	for k := range other.set {
+		mss.set[k] = struct{}{}
+	}
+}
+
 func (mss *memorySidSet) List() []string {
 	mss.mut.Lock()
 	defer mss.mut.Unlock()
@@ -99,22 +108,35 @@ func (mim *memoryIndexMap) UpdateIndex(sid string, labels LabelSet) {
 	}
 }
 
-func (mim *memoryIndexMap) MatchSids(labels LabelSet) []string {
+func (mim *memoryIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []string {
 	mim.mut.Lock()
 	defer mim.mut.Unlock()
 
 	sids := newMemorySidSet()
+	var got bool
 	for i := len(labels) - 1; i >= 0; i-- {
-		midx := mim.idx[labels[i].MarshalName()]
+		temp := newMemorySidSet()
+		vs := lvs.Match(labels[i].Name, labels[i].Value)
+		for _, v := range vs {
+			midx := mim.idx[joinSeparator(labels[i].Name, v)]
+			if midx == nil || midx.Size() <= 0 {
+				continue
+			}
 
-		if midx == nil {
+			temp.Union(midx.Copy())
+		}
+
+		if temp == nil || temp.Size() <= 0 {
 			return nil
 		}
 
-		if midx.Size() <= 0 {
-			return nil
+		if !got {
+			sids = temp
+			got = true
+			continue
 		}
-		sids.Intersection(midx.Copy())
+
+		sids.Intersection(temp.Copy())
 	}
 
 	return sids.List()
@@ -185,23 +207,26 @@ func (dim *diskIndexMap) MatchLabels(lids ...uint32) []Label {
 	return ret
 }
 
-func (dim *diskIndexMap) MatchSids(labels LabelSet) []uint32 {
+func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []uint32 {
 	dim.mut.Lock()
 	defer dim.mut.Unlock()
 
 	lst := make([]*roaring.Bitmap, 0)
 	for i := len(labels) - 1; i >= 0; i-- {
-		labelIdx := dim.label2sids[labels[i].MarshalName()]
+		temp := make([]*roaring.Bitmap, 0)
+		vs := lvs.Match(labels[i].Name, labels[i].Value)
 
-		if labelIdx == nil {
-			return nil
+		for _, v := range vs {
+			didx := dim.label2sids[joinSeparator(labels[i].Name, v)]
+			if didx == nil || didx.set.IsEmpty() {
+				continue
+			}
+
+			temp = append(temp, didx.set)
 		}
 
-		if labelIdx.set.IsEmpty() {
-			return nil
-		}
-
-		lst = append(lst, labelIdx.set)
+		union := roaring.ParOr(2, temp...)
+		lst = append(lst, union)
 	}
 
 	return roaring.ParAnd(2, lst...).ToArray()

@@ -108,7 +108,7 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 }
 
 func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
-	matchSids := ms.indexMap.MatchSids(labels)
+	matchSids := ms.indexMap.MatchSids(ms.labelVs, labels)
 	ret := make([]LabelSet, 0)
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
@@ -121,7 +121,7 @@ func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
 }
 
 func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	matchSids := ms.indexMap.MatchSids(labels)
+	matchSids := ms.indexMap.MatchSids(ms.labelVs, labels)
 	ret := make([]MetricRet, 0, len(matchSids))
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)

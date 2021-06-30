@@ -103,7 +103,7 @@ func (ds *diskSegment) InsertRows(_ []*Row) {
 }
 
 func (ds *diskSegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
-	sids := ds.indexMap.MatchSids(labels)
+	sids := ds.indexMap.MatchSids(ds.labelVs, labels)
 	ret := make([]LabelSet, 0)
 
 	for _, sid := range sids {
@@ -114,7 +114,7 @@ func (ds *diskSegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
 }
 
 func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	sids := ds.indexMap.MatchSids(labels)
+	sids := ds.indexMap.MatchSids(ds.labelVs, labels)
 
 	ret := make([]MetricRet, 0)
 	for _, sid := range sids {
@@ -145,9 +145,11 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 			}
 		}
 
+		lbs := ds.indexMap.MatchLabels(ds.series[sid].Labels...)
+		lbs = append(lbs, Label{Name: metricName, Value: labels.Metric()})
 		ret = append(ret, MetricRet{
 			DataPoints: dps,
-			Labels:     ds.indexMap.MatchLabels(ds.series[sid].Labels...),
+			Labels:     lbs,
 		})
 	}
 

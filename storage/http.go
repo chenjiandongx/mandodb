@@ -39,6 +39,7 @@ func (s *server) queryLabelValues(c *fiber.Ctx) error {
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
 	}
+
 	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
@@ -68,6 +69,7 @@ func (s *server) querySeries(c *fiber.Ctx) error {
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
 	}
+
 	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
 		return c.JSON(qsResponse{Status: "error"})
@@ -75,6 +77,14 @@ func (s *server) querySeries(c *fiber.Ctx) error {
 
 	labels := make([]Label, 0)
 	for _, label := range me.LabelFilters {
+		if label.IsRegexp {
+			labels = append(labels, Label{
+				Name:  label.Label,
+				Value: labelValuesRegxPrefix + label.Value + labelValuesRegxSuffix,
+			})
+			continue
+		}
+
 		labels = append(labels, Label{Name: label.Label, Value: label.Value})
 	}
 
@@ -132,25 +142,34 @@ func (s *server) queryRange(c *fiber.Ctx) error {
 		return c.JSON(qrResponse{Status: "error"})
 	}
 
-	labels := make([]Label, 0)
-	var metric string
-
-	for _, label := range me.LabelFilters {
-		if label.Label == "__name__" {
-			metric = label.Value
-			continue
-		}
-
-		labels = append(labels, Label{Name: label.Label, Value: label.Value})
-	}
-
 	start, err := tryInt64(c.FormValue("start"))
 	if err != nil {
 		return c.JSON(qrResponse{Status: "error"})
 	}
+
 	end, err := tryInt64(c.FormValue("end"))
 	if err != nil {
 		return c.JSON(qrResponse{Status: "error"})
+	}
+
+	labels := make([]Label, 0)
+	var metric string
+
+	for _, label := range me.LabelFilters {
+		if label.Label == metricName {
+			metric = label.Value
+			continue
+		}
+
+		if label.IsRegexp {
+			labels = append(labels, Label{
+				Name:  label.Label,
+				Value: labelValuesRegxPrefix + label.Value + labelValuesRegxSuffix,
+			})
+			continue
+		}
+
+		labels = append(labels, Label{Name: label.Label, Value: label.Value})
 	}
 
 	ret, err := s.ref.QueryRange(metric, labels, start, end)

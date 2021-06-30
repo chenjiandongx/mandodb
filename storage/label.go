@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bytes"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,6 +74,32 @@ func (lvs *labelValueSet) Get(label string) []string {
 	return ret
 }
 
+const (
+	labelValuesRegxPrefix = "$Regx("
+	labelValuesRegxSuffix = ")"
+)
+
+func (lvs *labelValueSet) Match(label, value string) []string {
+	// $Regx()
+	ret := make([]string, 0)
+	if strings.HasPrefix(value, labelValuesRegxPrefix) && strings.HasSuffix(value, labelValuesRegxSuffix) {
+		pattern, err := regexp.Compile(value[len(labelValuesRegxPrefix) : len(value)-1])
+		if err != nil {
+			return []string{value}
+		}
+
+		for _, v := range lvs.Get(label) {
+			if pattern.MatchString(v) {
+				ret = append(ret, v)
+			}
+		}
+
+		return ret
+	}
+
+	return []string{value}
+}
+
 type LabelSet []Label
 
 // filter 过滤空 kv 和重复数据
@@ -89,6 +116,16 @@ func (ls LabelSet) filter() LabelSet {
 	}
 
 	return ls[:size]
+}
+
+func (ls LabelSet) Metric() string {
+	for _, l := range ls {
+		if l.Name == metricName {
+			return l.Value
+		}
+	}
+
+	return ""
 }
 
 func (ls LabelSet) Map() map[string]string {
