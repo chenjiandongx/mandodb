@@ -48,8 +48,10 @@ func (n *node) insert(key int64, data interface{}) *node {
 	}
 
 	if key < n.key {
+		// 将节点插入到左子树中
 		n.left = n.left.insert(key, data)
 	} else {
+		// 将节点插入到右子树中
 		n.right = n.right.insert(key, data)
 	}
 
@@ -57,6 +59,7 @@ func (n *node) insert(key int64, data interface{}) *node {
 
 	bf := n.balance()
 
+	// 继续维持树平衡
 	if bf < -1 {
 		if n.left.balance() >= 0 {
 			n.left = n.left.rotateLeft()
@@ -72,6 +75,12 @@ func (n *node) insert(key int64, data interface{}) *node {
 	return n
 }
 
+//
+// 右右情况：左旋
+//		*
+//	     *
+//	      *
+//
 func (n *node) rotateLeft() *node {
 	r := n.right
 	n.right = r.left
@@ -83,6 +92,12 @@ func (n *node) rotateLeft() *node {
 	return r
 }
 
+//
+// 左左情况：右旋
+//		*
+//	   *
+//	  *
+//
 func (n *node) rotateRight() *node {
 	l := n.left
 	n.left = l.right

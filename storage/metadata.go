@@ -36,10 +36,12 @@ type MetaSerializer interface {
 	Unmarshal([]byte, *Metadata) error
 }
 
+// MarshalMeta 负责序列化 Meta 数据
 func MarshalMeta(meta Metadata) ([]byte, error) {
 	return globalOpts.metaSerializer.Marshal(meta)
 }
 
+// UnmarshalMeta 负责反序列化 Meta 数据
 func UnmarshalMeta(data []byte, meta *Metadata) error {
 	return globalOpts.metaSerializer.Unmarshal(data, meta)
 }
@@ -87,7 +89,10 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 		for _, lb := range rl {
 			lids = append(lids, uint32(labelOrdered[lb.MarshalName()]))
 		}
-		sort.Slice(lids, func(i, j int) bool { return lids[i] < lids[j] })
+
+		sort.Slice(lids, func(i, j int) bool {
+			return lids[i] < lids[j]
+		})
 		encf.MarshalUint32(lids...)
 	}
 	encf.MarshalUint8(endOfBlock)

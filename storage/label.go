@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"regexp"
+	"regexp/syntax"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,11 +80,93 @@ const (
 	labelValuesRegxSuffix = ")"
 )
 
+// fastRegexMatcher 是一种优化的正则匹配器 算法来自 prometheus
+type fastRegexMatcher struct {
+	re       *regexp.Regexp
+	prefix   string
+	suffix   string
+	contains string
+}
+
+func newFastRegexMatcher(v string) (*fastRegexMatcher, error) {
+	re, err := regexp.Compile("^(?:" + v + ")$")
+	if err != nil {
+		return nil, err
+	}
+
+	// 语法解析
+	parsed, err := syntax.Parse(v, syntax.Perl)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &fastRegexMatcher{
+		re: re,
+	}
+
+	if parsed.Op == syntax.OpConcat {
+		m.prefix, m.suffix, m.contains = optimizeConcatRegex(parsed)
+	}
+
+	return m, nil
+}
+
+func (m *fastRegexMatcher) MatchString(s string) bool {
+	if m.prefix != "" && !strings.HasPrefix(s, m.prefix) {
+		return false
+	}
+
+	if m.suffix != "" && !strings.HasSuffix(s, m.suffix) {
+		return false
+	}
+
+	if m.contains != "" && !strings.Contains(s, m.contains) {
+		return false
+	}
+	return m.re.MatchString(s)
+}
+
+func optimizeConcatRegex(r *syntax.Regexp) (prefix, suffix, contains string) {
+	sub := r.Sub
+
+	// 移除前缀空格
+	if len(sub) > 0 && sub[0].Op == syntax.OpBeginText {
+		sub = sub[1:]
+	}
+
+	// 移除后缀空格
+	if len(sub) > 0 && sub[len(sub)-1].Op == syntax.OpEndText {
+		sub = sub[:len(sub)-1]
+	}
+
+	if len(sub) == 0 {
+		return
+	}
+
+	// 如果前缀和后缀是正常字符的话可以直接标记下来
+	if sub[0].Op == syntax.OpLiteral {
+		prefix = string(sub[0].Rune)
+	}
+	if last := len(sub) - 1; sub[last].Op == syntax.OpLiteral {
+		suffix = string(sub[last].Rune)
+	}
+
+	// 这里已经去除首尾了 匹配中间的字符串
+	for i := 1; i < len(sub)-1; i++ {
+		if sub[i].Op == syntax.OpLiteral {
+			contains = string(sub[i].Rune)
+			break
+		}
+	}
+
+	return
+}
+
+// Match 主要用于正则匹配 Labels 组合 函数标识 $Regx()
 func (lvs *labelValueSet) Match(label, value string) []string {
-	// $Regx()
 	ret := make([]string, 0)
 	if strings.HasPrefix(value, labelValuesRegxPrefix) && strings.HasSuffix(value, labelValuesRegxSuffix) {
-		pattern, err := regexp.Compile(value[len(labelValuesRegxPrefix) : len(value)-1])
+		pattern, err := newFastRegexMatcher(value[len(labelValuesRegxPrefix) : len(value)-1])
 		if err != nil {
 			return []string{value}
 		}
@@ -118,6 +201,7 @@ func (ls LabelSet) filter() LabelSet {
 	return ls[:size]
 }
 
+// Metric 返回 __name__ 指标名称
 func (ls LabelSet) Metric() string {
 	for _, l := range ls {
 		if l.Name == metricName {
@@ -128,6 +212,7 @@ func (ls LabelSet) Metric() string {
 	return ""
 }
 
+// Map 将 Label 列表转换成 map
 func (ls LabelSet) Map() map[string]string {
 	m := make(map[string]string)
 	for _, label := range ls {
@@ -152,6 +237,7 @@ func (ls LabelSet) AddMetricName(metric string) LabelSet {
 	return labels
 }
 
+// Hash 哈希计算 LabelSet 唯一标识符
 func (ls LabelSet) Hash() uint64 {
 	sort.Sort(ls) // 保证每次 hash 结果一致
 	b := labelBufPool.Get().([]byte)
@@ -163,7 +249,7 @@ func (ls LabelSet) Hash() uint64 {
 		b = append(b, v.Value...)
 		b = append(b, sep)
 	}
-	h := xxhash.Sum64(b)
+	h := xxhash.Sum64(b) // xxhash 参考 VictoriaMetrics
 
 	b = b[:0]
 	labelBufPool.Put(b) // 复用 buffer
@@ -171,6 +257,7 @@ func (ls LabelSet) Hash() uint64 {
 	return h
 }
 
+// Has 判断 label 是否存在
 func (ls LabelSet) Has(name string) bool {
 	for _, label := range ls {
 		if label.Name == name {
