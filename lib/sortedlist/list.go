@@ -1,9 +1,21 @@
-package avltree
+package sortedlist
 
 import "math"
 
-type Tree struct {
+type tree struct {
 	root *node
+}
+
+func NewTree() List {
+	return &tree{}
+}
+
+// List 实现了排序链表的数据结构
+type List interface {
+	Remove(key int64) (interface{}, bool)
+	Add(key int64, data interface{})
+	Range(lower, upper int64) []interface{}
+	All() []interface{}
 }
 
 type node struct {
@@ -100,11 +112,11 @@ func (n *node) Remove(key int64) (interface{}, bool) {
 	return n.right.Remove(key)
 }
 
-func (t *Tree) Add(key int64, data interface{}) {
+func (t *tree) Add(key int64, data interface{}) {
 	t.root = t.root.insert(key, data)
 }
 
-func (t *Tree) Remove(key int64) (value interface{}, ok bool) {
+func (t *tree) Remove(key int64) (value interface{}, ok bool) {
 	old, ok := t.root.Remove(key)
 	if !ok {
 		t.Add(key, nil)
@@ -114,11 +126,11 @@ func (t *Tree) Remove(key int64) (value interface{}, ok bool) {
 	return old, true
 }
 
-func (t *Tree) All() []interface{} {
+func (t *tree) All() []interface{} {
 	return t.Range(0, math.MaxInt64)
 }
 
-func (t *Tree) Range(lower, upper int64) []interface{} {
+func (t *tree) Range(lower, upper int64) []interface{} {
 	if t.root == nil {
 		return nil
 	}

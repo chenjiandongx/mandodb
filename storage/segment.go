@@ -3,7 +3,7 @@ package storage
 import (
 	"os"
 
-	"github.com/chenjiandongx/mandodb/lib/avltree"
+	"github.com/chenjiandongx/mandodb/lib/sortedlist"
 )
 
 type SegmentType string
@@ -36,11 +36,11 @@ type Desc struct {
 
 type SegmentList struct {
 	head Segment
-	lst  *avltree.Tree
+	lst  sortedlist.List
 }
 
 func newSegmentList() *SegmentList {
-	return &SegmentList{head: newMemorySegment(), lst: &avltree.Tree{}}
+	return &SegmentList{head: newMemorySegment(), lst: sortedlist.NewTree()}
 }
 
 func (sl *SegmentList) Get(start, end int64) []Segment {

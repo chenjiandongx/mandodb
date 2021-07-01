@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"runtime"
@@ -13,26 +14,33 @@ import (
 
 	"github.com/cespare/xxhash"
 	"github.com/chenjiandongx/logger"
+
 	"github.com/chenjiandongx/mandodb/lib/mmap"
+	"github.com/chenjiandongx/mandodb/lib/timerpool"
 )
 
 // TODO: list
-// * 归档数据使用 snappy/zstd 压缩
 // * 磁盘文件合并 参考 leveldb
 // * WAL 做灾备
 
 type tsdbOptions struct {
 	metaSerializer  MetaSerializer
 	bytesCompressor BytesCompressor
+	listenAddr      string
+	writeTimeout    time.Duration
 }
 
 var globalOpts = &tsdbOptions{
 	metaSerializer:  newBinaryMetaSerializer(),
 	bytesCompressor: newZstdBytesCompressor(),
+	listenAddr:      "0.0.0.0:8789",
+	writeTimeout:    30 * time.Second,
 }
 
 type Option func(c *tsdbOptions)
 
+// WithMetaSerializerType 设置 Metadata 数据的序列化类型
+// 目前只提供了 BinaryMetaSerializer
 func WithMetaSerializerType(t MetaSerializerType) Option {
 	return func(c *tsdbOptions) {
 		switch t {
@@ -42,6 +50,11 @@ func WithMetaSerializerType(t MetaSerializerType) Option {
 	}
 }
 
+// WithMetaBytesCompressorType 设置字节数据的压缩算法
+// 目前提供了
+// * 不压缩: NoopBytesCompressor
+// * ZSTD: ZstdBytesCompressor（默认）
+// * Snappy: SnappyBytesCompressor
 func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 	return func(c *tsdbOptions) {
 		switch t {
@@ -55,9 +68,25 @@ func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 	}
 }
 
+// WithListenAddr 设置 TSDB HTTP 服务监听地址
+// 默认为 0.0.0.0:8789
+func WithListenAddr(addr string) Option {
+	return func(c *tsdbOptions) {
+		c.listenAddr = addr
+	}
+}
+
+// WithWriteTimeout 设置写超时阈值
+// 默认为 30s
+func WithWriteTimeout(t time.Duration) Option {
+	return func(c *tsdbOptions) {
+		c.writeTimeout = t
+	}
+}
+
 const (
 	separator         = "/-/"
-	defaultQSize      = 128
+	defaultQSize      = 64
 	defaultWriteBatch = 256
 )
 
@@ -110,8 +139,14 @@ type TSDB struct {
 }
 
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
+	t := timerpool.Get(globalOpts.writeTimeout)
+
 	select {
 	case tsdb.q <- rows:
+		timerpool.Put(t)
+	case <-t.C:
+		timerpool.Put(t)
+		return errors.New("failed to insert rows to database, write timeout")
 	}
 
 	return nil
@@ -356,7 +391,11 @@ func (tsdb *TSDB) loadFiles() {
 	}
 }
 
-func OpenTSDB() *TSDB {
+func OpenTSDB(opts ...Option) *TSDB {
+	for _, opt := range opts {
+		opt(globalOpts)
+	}
+
 	tsdb := &TSDB{
 		segs: newSegmentList(),
 		q:    make(chan []*Row, defaultQSize),
@@ -373,7 +412,11 @@ func OpenTSDB() *TSDB {
 		go tsdb.ingestRows(tsdb.ctx)
 	}
 
-	go tsdb.srv.Run(":8099")
+	go func() {
+		if err := tsdb.srv.Run(globalOpts.listenAddr); err != nil {
+			logger.Warn("server exit.")
+		}
+	}()
 
 	return tsdb
 }
