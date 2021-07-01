@@ -21,7 +21,7 @@ type Segment interface {
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
-	Marshal() ([]byte, []byte, []byte, error)
+	Marshal() ([]byte, []byte, error)
 	Type() SegmentType
 	Close() error
 	Load() Segment

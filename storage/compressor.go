@@ -18,6 +18,14 @@ type BytesCompressor interface {
 	Decompress(src []byte) ([]byte, error)
 }
 
+func ByteCompress(src []byte) []byte {
+	return globalOpts.bytesCompressor.Compress(src)
+}
+
+func ByteDecompress(src []byte) ([]byte, error) {
+	return globalOpts.bytesCompressor.Decompress(src)
+}
+
 type noopBytesCompressor struct{}
 
 func newNoopBytesCompressor() BytesCompressor {

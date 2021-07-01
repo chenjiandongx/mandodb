@@ -46,6 +46,10 @@ func (e *encbuf) MarshalUint64(u ...uint64) {
 	}
 }
 
+func (e *encbuf) MarshalBytes(b []byte) {
+	e.B = append(e.B, b...)
+}
+
 func (e *encbuf) MarshalString(s string) {
 	e.B = append(e.B, s...)
 }

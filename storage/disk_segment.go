@@ -2,7 +2,7 @@ package storage
 
 import (
 	"bytes"
-	"io/ioutil"
+	"encoding/binary"
 	"time"
 
 	"github.com/chenjiandongx/logger"
@@ -12,9 +12,10 @@ import (
 )
 
 type diskSegment struct {
-	dataFd *mmap.MmapFile
-	metaF  string
-	load   bool
+	dataFd       *mmap.MmapFile
+	dataFilename string
+	metaSize     uint64
+	load         bool
 
 	labelVs  *labelValueSet
 	indexMap *diskIndexMap
@@ -27,13 +28,13 @@ type diskSegment struct {
 	dataPointsCount int64
 }
 
-func newDiskSegment(mf *mmap.MmapFile, metaF string, minTs, maxTs int64) Segment {
+func newDiskSegment(mf *mmap.MmapFile, dataFilename string, minTs, maxTs int64) Segment {
 	return &diskSegment{
-		dataFd:  mf,
-		metaF:   metaF,
-		minTs:   minTs,
-		maxTs:   maxTs,
-		labelVs: newLabelValueSet(),
+		dataFd:       mf,
+		dataFilename: dataFilename,
+		minTs:        minTs,
+		maxTs:        maxTs,
+		labelVs:      newLabelValueSet(),
 	}
 }
 
@@ -57,20 +58,34 @@ func (ds *diskSegment) Close() error {
 	return ds.dataFd.Close()
 }
 
+func (ds *diskSegment) shift() uint64 {
+	return ds.metaSize + uint64Size
+}
+
 func (ds *diskSegment) Load() Segment {
 	if ds.load {
 		return ds
 	}
 
 	t0 := time.Now()
-	bs, err := ioutil.ReadFile(ds.metaF)
+	reader := bytes.NewReader(ds.dataFd.Bytes())
+	dst := make([]byte, uint64Size)
+	_, err := reader.ReadAt(dst, 0)
 	if err != nil {
-		logger.Errorf("failed to read file %s: %v", ds.metaF, err)
+		logger.Errorf("failed to read %s meta-size: %v", ds.dataFilename, err)
+		return ds
+	}
+
+	ds.metaSize = binary.LittleEndian.Uint64(dst)
+	metaBytes := make([]byte, ds.metaSize)
+	_, err = reader.ReadAt(metaBytes, uint64Size)
+	if err != nil {
+		logger.Errorf("failed to read %s meta-bytes: %v", ds.dataFilename, err)
 		return ds
 	}
 
 	meta := Metadata{}
-	if err := UnmarshalMeta(bs, &meta); err != nil {
+	if err := UnmarshalMeta(metaBytes, &meta); err != nil {
 		logger.Errorf("failed to unmarshal meta: %v", err)
 		return ds
 	}
@@ -86,12 +101,12 @@ func (ds *diskSegment) Load() Segment {
 	ds.series = meta.Series
 	ds.load = true
 
-	logger.Infof("load disk segment %s, take: %v", ds.metaF, time.Since(t0))
+	logger.Infof("load disk segment %s, take: %v", ds.dataFilename, time.Since(t0))
 	return ds
 }
 
-func (ds *diskSegment) Marshal() ([]byte, []byte, []byte, error) {
-	return nil, nil, nil, nil
+func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
+	return nil, nil, nil
 }
 
 func (ds *diskSegment) QueryLabelValues(label string) []string {
@@ -118,8 +133,8 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 
 	ret := make([]MetricRet, 0)
 	for _, sid := range sids {
-		startOffset := ds.series[sid].StartOffset
-		endOffset := ds.series[sid].EndOffset
+		startOffset := ds.series[sid].StartOffset + ds.shift()
+		endOffset := ds.series[sid].EndOffset + ds.shift()
 
 		reader := bytes.NewReader(ds.dataFd.Bytes())
 		dataBytes := make([]byte, endOffset-startOffset)
@@ -128,7 +143,7 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 			return nil, err
 		}
 
-		dataBytes, err = globalOpts.bytesCompressor.Decompress(dataBytes)
+		dataBytes, err = ByteDecompress(dataBytes)
 		if err != nil {
 			return nil, err
 		}

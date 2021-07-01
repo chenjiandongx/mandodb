@@ -96,11 +96,11 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	encf.MarshalUint64(uint64(meta.MaxTs))
 	encf.MarshalString(magic)
 
-	return globalOpts.bytesCompressor.Compress(encf.Bytes()), nil
+	return ByteCompress(encf.Bytes()), nil
 }
 
 func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
-	data, err := globalOpts.bytesCompressor.Decompress(data)
+	data, err := ByteDecompress(data)
 	if err != nil {
 		return ErrInvalidSize
 	}

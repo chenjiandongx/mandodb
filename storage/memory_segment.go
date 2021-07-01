@@ -71,8 +71,7 @@ func (ms *memorySegment) Close() error {
 		return nil
 	}
 
-	_, err := writeToDisk(ms)
-	return err
+	return writeToDisk(ms)
 }
 
 func (ms *memorySegment) Load() Segment {
@@ -136,7 +135,7 @@ func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]Metric
 	return ret, nil
 }
 
-func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
+func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	sids := make(map[string]uint32)
 
 	startOffset := 0
@@ -155,7 +154,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 		series := value.(*Series)
 		meta.sidRelatedLabels = append(meta.sidRelatedLabels, series.labels)
 
-		dataBytes := globalOpts.bytesCompressor.Compress(series.store.Bytes())
+		dataBytes := ByteCompress(series.store.Bytes())
 		dataBuf = append(dataBuf, dataBytes...)
 
 		endOffset := startOffset + len(dataBytes)
@@ -186,7 +185,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 
 	metaBytes, err := MarshalMeta(meta)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	desc := &Desc{
@@ -198,13 +197,18 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, []byte, error) {
 
 	descBytes, _ := json.MarshalIndent(desc, "", "    ")
 
-	return metaBytes, dataBuf, descBytes, nil
+	encf := newEncbuf()
+	encf.MarshalUint64(uint64(len(metaBytes)))
+	encf.MarshalBytes(metaBytes)
+	encf.MarshalBytes(dataBuf)
+
+	return encf.Bytes(), descBytes, nil
 }
 
-func writeToDisk(segment Segment) (*Metadata, error) {
-	metaBytes, dataBytes, descBytes, err := segment.Marshal()
+func writeToDisk(segment Segment) error {
+	dataBytes, descBytes, err := segment.Marshal()
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal segment: %s", err.Error())
+		return fmt.Errorf("failed to marshal segment: %s", err.Error())
 	}
 
 	writeFile := func(f string, data []byte) error {
@@ -223,22 +227,13 @@ func writeToDisk(segment Segment) (*Metadata, error) {
 	}
 
 	prefix := filePrefix(segment.MinTs(), segment.MaxTs())
-	if err := writeFile(prefix+"meta", metaBytes); err != nil {
-		return nil, err
-	}
-
 	if err := writeFile(prefix+"data", dataBytes); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := writeFile(prefix+"json", descBytes); err != nil {
-		return nil, err
+		return err
 	}
 
-	md := Metadata{}
-	if err = UnmarshalMeta(metaBytes, &md); err != nil {
-		return nil, err
-	}
-
-	return &md, nil
+	return nil
 }

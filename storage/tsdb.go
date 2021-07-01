@@ -168,8 +168,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 
 			t0 := time.Now()
 			prefix := filePrefix(head.MinTs(), head.MaxTs())
-			_, err := writeToDisk(head)
-			if err != nil {
+			if err := writeToDisk(head); err != nil {
 				logger.Errorf("failed to flush data to disk, %v", err)
 				return
 			}
@@ -217,10 +216,10 @@ func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) (
 		temp = append(temp, data...)
 	}
 
-	return tsdb.MergeQueryRangeResult(temp...), nil
+	return tsdb.mergeQueryRangeResult(temp...), nil
 }
 
-func (tsdb *TSDB) MergeQueryRangeResult(ret ...MetricRet) []MetricRet {
+func (tsdb *TSDB) mergeQueryRangeResult(ret ...MetricRet) []MetricRet {
 	metrics := make(map[uint64]*MetricRet)
 	for _, r := range ret {
 		h := LabelSet(r.Labels).Hash()
@@ -261,10 +260,10 @@ func (tsdb *TSDB) QuerySeries(labels LabelSet, start, end int64) ([]map[string]s
 		temp = append(temp, data...)
 	}
 
-	return tsdb.MergeQuerySeriesResult(temp...), nil
+	return tsdb.mergeQuerySeriesResult(temp...), nil
 }
 
-func (tsdb *TSDB) MergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
+func (tsdb *TSDB) mergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
 	lbs := make(map[uint64]LabelSet)
 	for _, r := range ret {
 		lbs[r.Hash()] = r
@@ -333,23 +332,24 @@ func (tsdb *TSDB) loadFiles() {
 
 			desc := Desc{}
 			if err := json.Unmarshal(bs, &desc); err != nil {
-				logger.Errorf("failed to unmarshal descfile: %v", err)
+				logger.Errorf("failed to unmarshal desc file: %v", err)
 				continue
 			}
 
+			// .json / .data 应该是成对出现
 			datafname := strings.ReplaceAll(file.Name(), ".json", ".data")
 			mf, err := mmap.OpenMmapFile(datafname)
 			if err != nil {
-				logger.Errorf("failed to open mmapfile %s, err: %v", file.Name(), err)
+				logger.Errorf("failed to open mmap file %s, err: %v", datafname, err)
 				continue
 			}
 
 			diskseg := &diskSegment{
-				dataFd:  mf,
-				metaF:   strings.ReplaceAll(file.Name(), ".json", ".meta"),
-				minTs:   desc.MinTs,
-				maxTs:   desc.MaxTs,
-				labelVs: newLabelValueSet(),
+				dataFd:       mf,
+				dataFilename: datafname,
+				minTs:        desc.MinTs,
+				maxTs:        desc.MaxTs,
+				labelVs:      newLabelValueSet(),
 			}
 			tsdb.segs.Add(diskseg)
 		}
