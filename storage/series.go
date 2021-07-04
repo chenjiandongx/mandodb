@@ -75,18 +75,12 @@ func (store *tszStore) MergeOutdatedList(lst sortedlist.List) *tszStore {
 	}
 
 	news := &tszStore{}
-	tmp := make([]*DataPoint, 0)
-	it1 := store.block.Iter()
-	for it1.Next() {
-		t1, v1 := it1.Values()
-		tmp = append(tmp, &DataPoint{Ts: int64(t1), Value: v1})
-	}
-
-	it2 := lst.All()
-	for it2.Next() {
-		dp := it2.Value().(DataPoint)
+	tmp := store.All()
+	it := lst.All()
+	for it.Next() {
+		dp := it.Value().(DataPoint)
 		t2, v2 := dp.Ts, dp.Value
-		tmp = append(tmp, &DataPoint{Ts: t2, Value: v2})
+		tmp = append(tmp, DataPoint{Ts: t2, Value: v2})
 	}
 
 	sort.Slice(tmp, func(i, j int) bool {
@@ -94,7 +88,7 @@ func (store *tszStore) MergeOutdatedList(lst sortedlist.List) *tszStore {
 	})
 
 	for i := 0; i < len(tmp); i++ {
-		news.Append(tmp[i])
+		news.Append(&tmp[i])
 	}
 
 	return news
