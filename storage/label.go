@@ -237,9 +237,12 @@ func (ls LabelSet) AddMetricName(metric string) LabelSet {
 	return labels
 }
 
+func (ls LabelSet) Sorted() {
+	sort.Sort(ls)
+}
+
 // Hash 哈希计算 LabelSet 唯一标识符
 func (ls LabelSet) Hash() uint64 {
-	sort.Sort(ls) // 保证每次 hash 结果一致
 	b := labelBufPool.Get().([]byte)
 
 	const sep = '\xff'
@@ -249,7 +252,7 @@ func (ls LabelSet) Hash() uint64 {
 		b = append(b, v.Value...)
 		b = append(b, sep)
 	}
-	h := xxhash.Sum64(b) // xxhash 参考 VictoriaMetrics
+	h := xxhash.Sum64(b)
 
 	b = b[:0]
 	labelBufPool.Put(b) // 复用 buffer

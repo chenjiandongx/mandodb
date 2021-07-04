@@ -28,13 +28,15 @@ type tsdbOptions struct {
 	bytesCompressor BytesCompressor
 	listenAddr      string
 	writeTimeout    time.Duration
+	segmentDuration time.Duration
 }
 
 var globalOpts = &tsdbOptions{
 	metaSerializer:  newBinaryMetaSerializer(),
-	bytesCompressor: newZstdBytesCompressor(),
+	bytesCompressor: newNoopBytesCompressor(),
 	listenAddr:      "0.0.0.0:8789",
 	writeTimeout:    30 * time.Second,
+	segmentDuration: 1 * time.Hour,
 }
 
 type Option func(c *tsdbOptions)
@@ -58,12 +60,12 @@ func WithMetaSerializerType(t MetaSerializerType) Option {
 func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 	return func(c *tsdbOptions) {
 		switch t {
-		case NoopBytesCompressor:
-			c.bytesCompressor = newNoopBytesCompressor()
+		case ZstdBytesCompressor:
+			c.bytesCompressor = newZstdBytesCompressor()
 		case SnappyBytesCompressor:
 			c.bytesCompressor = newSnappyBytesCompressor()
-		default: // zstd
-			c.bytesCompressor = newZstdBytesCompressor()
+		default: // noop
+			c.bytesCompressor = newNoopBytesCompressor()
 		}
 	}
 }
@@ -198,6 +200,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 		head := tsdb.segs.head
 
 		go func() {
+			// TODO: 这里可以先把它加入到 segs 中 作为 memory segment 等写完再删除对象
 			tsdb.wg.Add(1)
 			defer tsdb.wg.Done()
 
@@ -335,8 +338,9 @@ func (tsdb *TSDB) Close() {
 	tsdb.wg.Wait()
 	tsdb.cancel()
 
-	for _, segment := range tsdb.segs.lst.All() {
-		segment.(Segment).Close()
+	it := tsdb.segs.lst.All()
+	for it.Next() {
+		it.Value().(Segment).Close()
 	}
 
 	tsdb.segs.head.Close()

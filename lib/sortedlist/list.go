@@ -14,8 +14,8 @@ func NewTree() List {
 type List interface {
 	Remove(key int64) (interface{}, bool)
 	Add(key int64, data interface{})
-	Range(lower, upper int64) []interface{}
-	All() []interface{}
+	Range(lower, upper int64) Iter
+	All() Iter
 }
 
 type node struct {
@@ -141,22 +141,49 @@ func (t *tree) Remove(key int64) (value interface{}, ok bool) {
 	return old, true
 }
 
-func (t *tree) All() []interface{} {
+func (t *tree) All() Iter {
 	return t.Range(0, math.MaxInt64)
 }
 
-func (t *tree) Range(lower, upper int64) []interface{} {
+func (t *tree) Range(lower, upper int64) Iter {
+	it := &iter{data: []interface{}{nil}}
 	if t.root == nil {
-		return nil
+		return it
 	}
 
-	results := make([]interface{}, 0)
+	findNodes(t.root, lower, upper, func(n *node) {
+		it.data = append(it.data, n.data)
+	})
 
-	nodeInRange := func(n *node) {
-		results = append(results, n.data)
+	return it
+}
+
+type Iter interface {
+	Next() bool
+	Value() interface{}
+	End() bool
+}
+
+type iter struct {
+	cursor int
+	data   []interface{}
+}
+
+func (it *iter) Next() bool {
+	it.cursor++
+	if len(it.data) > it.cursor {
+		return true
 	}
-	findNodes(t.root, lower, upper, nodeInRange)
-	return results
+
+	return false
+}
+
+func (it *iter) Value() interface{} {
+	return it.data[it.cursor]
+}
+
+func (it *iter) End() bool {
+	return it.cursor >= len(it.data)
 }
 
 func isNodeInRange(n *node, lower, upper int64) bool {

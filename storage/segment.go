@@ -46,9 +46,10 @@ func newSegmentList() *SegmentList {
 func (sl *SegmentList) Get(start, end int64) []Segment {
 	segs := make([]Segment, 0)
 
-	rows := sl.lst.All()
-	for i := 0; i < len(rows); i++ {
-		seg := rows[i].(Segment)
+	iter := sl.lst.All()
+
+	for iter.Next() {
+		seg := iter.Value().(Segment)
 		if sl.Choose(seg, start, end) {
 			segs = append(segs, seg)
 		}

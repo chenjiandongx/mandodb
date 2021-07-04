@@ -3,10 +3,14 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"github.com/chenjiandongx/mandodb/lib/sortedlist"
 )
 
 type memorySegment struct {
@@ -14,10 +18,15 @@ type memorySegment struct {
 	segment  sync.Map
 	indexMap *memoryIndexMap
 
+	outdated    map[string]sortedlist.List
+	outdatedMut sync.Mutex
+
 	labelVs *labelValueSet
 
-	minTs int64
-	maxTs int64
+	rangeStart int64
+	rangeEnd   int64
+	minTs      int64
+	maxTs      int64
 
 	seriesCount     int64
 	dataPointsCount int64
@@ -25,15 +34,20 @@ type memorySegment struct {
 
 func newMemorySegment() Segment {
 	return &memorySegment{
-		indexMap: newMemoryIndexMap(),
-		labelVs:  newLabelValueSet(),
+		indexMap:   newMemoryIndexMap(),
+		labelVs:    newLabelValueSet(),
+		outdated:   make(map[string]sortedlist.List),
+		rangeStart: time.Now().Unix(),
+		rangeEnd:   time.Now().Unix() + int64(globalOpts.segmentDuration.Seconds()),
+		minTs:      math.MaxInt64,
+		maxTs:      math.MinInt64,
 	}
 }
 
-func (ms *memorySegment) getOrCreateSeries(row *Row) *Series {
+func (ms *memorySegment) getOrCreateSeries(row *Row) *memorySeries {
 	v, ok := ms.segment.Load(row.ID())
 	if ok {
-		return v.(*Series)
+		return v.(*memorySeries)
 	}
 
 	atomic.AddInt64(&ms.seriesCount, 1)
@@ -41,6 +55,10 @@ func (ms *memorySegment) getOrCreateSeries(row *Row) *Series {
 	ms.segment.Store(row.ID(), newSeries)
 
 	return newSeries
+}
+
+func (ms *memorySegment) inRange(t int64) bool {
+	return t >= ms.rangeStart && ms.rangeEnd >= t && t <= time.Now().Unix()+120
 }
 
 func (ms *memorySegment) MinTs() int64 {
@@ -52,8 +70,7 @@ func (ms *memorySegment) MaxTs() int64 {
 }
 
 func (ms *memorySegment) Frozen() bool {
-	// TODO: 动态配置
-	return ms.MaxTs()-ms.MinTs() >= 3600
+	return ms.MaxTs()-ms.MinTs() >= int64(globalOpts.segmentDuration.Seconds())
 }
 
 func (ms *memorySegment) QueryLabelValues(label string) []string {
@@ -61,7 +78,6 @@ func (ms *memorySegment) QueryLabelValues(label string) []string {
 }
 
 func (ms *memorySegment) Type() SegmentType {
-
 	return MemorySegmentType
 }
 
@@ -86,20 +102,25 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		}
 
 		row.Labels = row.Labels.AddMetricName(row.Metric)
+		row.Labels.Sorted()
 		series := ms.getOrCreateSeries(row)
 
-		outdated := series.store.Append(&row.DataPoint)
+		dp := series.Append(&row.DataPoint)
 
-		// TODO: 处理乱序数据
-		_ = outdated
+		if dp != nil {
+			ms.outdatedMut.Lock()
+			if _, ok := ms.outdated[row.ID()]; !ok {
+				ms.outdated[row.ID()] = sortedlist.NewTree()
+			}
+			ms.outdated[row.ID()].Add(row.DataPoint.Ts, row.DataPoint)
+			ms.outdatedMut.Unlock()
+		}
 
-		ms.once.Do(func() {
-			ms.minTs = row.DataPoint.Ts
-			ms.maxTs = row.DataPoint.Ts
-		})
-
-		if atomic.LoadInt64(&ms.maxTs) < row.DataPoint.Ts {
-			atomic.SwapInt64(&ms.maxTs, row.DataPoint.Ts)
+		if atomic.LoadInt64(&ms.minTs) >= row.DataPoint.Ts {
+			atomic.StoreInt64(&ms.minTs, row.DataPoint.Ts)
+		}
+		if atomic.LoadInt64(&ms.maxTs) <= row.DataPoint.Ts {
+			atomic.StoreInt64(&ms.maxTs, row.DataPoint.Ts)
 		}
 		atomic.AddInt64(&ms.dataPointsCount, 1)
 		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
@@ -111,7 +132,7 @@ func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
 	ret := make([]LabelSet, 0)
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
-		series := b.(*Series)
+		series := b.(*memorySeries)
 
 		ret = append(ret, series.labels)
 	}
@@ -124,11 +145,24 @@ func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]Metric
 	ret := make([]MetricRet, 0, len(matchSids))
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
-		series := b.(*Series)
+		series := b.(*memorySeries)
+
+		dps := series.Get(start, end)
+
+		ms.outdatedMut.Lock()
+		v, ok := ms.outdated[sid]
+		if ok {
+			iter := v.Range(start, end)
+			for iter.Next() {
+				dps = append(dps, iter.Value().(DataPoint))
+			}
+
+		}
+		ms.outdatedMut.Unlock()
 
 		ret = append(ret, MetricRet{
 			Labels:     series.labels,
-			DataPoints: series.store.Get(start, end),
+			DataPoints: dps,
 		})
 	}
 
@@ -151,12 +185,21 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 		sids[sid] = uint32(size)
 		size++
 
-		series := value.(*Series)
+		series := value.(*memorySeries)
 		meta.sidRelatedLabels = append(meta.sidRelatedLabels, series.labels)
 
-		dataBytes := ByteCompress(series.store.Bytes())
-		dataBuf = append(dataBuf, dataBytes...)
+		ms.outdatedMut.Lock()
+		v, ok := ms.outdated[sid]
+		ms.outdatedMut.Unlock()
 
+		var dataBytes []byte
+		if ok {
+			dataBytes = ByteCompress(series.MergeOutdatedList(v).Bytes())
+		} else {
+			dataBytes = ByteCompress(series.Bytes())
+		}
+
+		dataBuf = append(dataBuf, dataBytes...)
 		endOffset := startOffset + len(dataBytes)
 		meta.Series = append(meta.Series, metaSeries{
 			Sid:         key.(string),
