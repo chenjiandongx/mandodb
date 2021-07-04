@@ -29,6 +29,7 @@ type tsdbOptions struct {
 	listenAddr      string
 	writeTimeout    time.Duration
 	segmentDuration time.Duration
+	onlyMemoryMode  bool
 }
 
 var globalOpts = &tsdbOptions{
@@ -37,6 +38,7 @@ var globalOpts = &tsdbOptions{
 	listenAddr:      "0.0.0.0:8789",
 	writeTimeout:    30 * time.Second,
 	segmentDuration: 1 * time.Hour,
+	onlyMemoryMode:  false,
 }
 
 type Option func(c *tsdbOptions)
@@ -83,6 +85,14 @@ func WithListenAddr(addr string) Option {
 func WithWriteTimeout(t time.Duration) Option {
 	return func(c *tsdbOptions) {
 		c.writeTimeout = t
+	}
+}
+
+// WithOnlyMemoryMode 设置是否默认只存储在内存中
+// 默认为 false
+func WithOnlyMemoryMode(memoryMode bool) Option {
+	return func(c *tsdbOptions) {
+		c.onlyMemoryMode = memoryMode
 	}
 }
 
@@ -335,6 +345,8 @@ func (tsdb *TSDB) QueryLabelValues(label string, start, end int64) []string {
 }
 
 func (tsdb *TSDB) Close() {
+	time.Sleep(time.Second)
+
 	tsdb.wg.Wait()
 	tsdb.cancel()
 

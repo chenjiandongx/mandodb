@@ -70,6 +70,10 @@ func (ms *memorySegment) MaxTs() int64 {
 }
 
 func (ms *memorySegment) Frozen() bool {
+	if globalOpts.onlyMemoryMode {
+		return false
+	}
+
 	return ms.MaxTs()-ms.MinTs() >= int64(globalOpts.segmentDuration.Seconds())
 }
 
@@ -82,8 +86,7 @@ func (ms *memorySegment) Type() SegmentType {
 }
 
 func (ms *memorySegment) Close() error {
-	// 内存无数据就不持久化了
-	if ms.MinTs() == 0 && ms.MaxTs() == 0 {
+	if ms.dataPointsCount == 0 || globalOpts.onlyMemoryMode {
 		return nil
 	}
 
