@@ -161,7 +161,6 @@ func (t *tree) Range(lower, upper int64) Iter {
 type Iter interface {
 	Next() bool
 	Value() interface{}
-	End() bool
 }
 
 type iter struct {
@@ -180,10 +179,6 @@ func (it *iter) Next() bool {
 
 func (it *iter) Value() interface{} {
 	return it.data[it.cursor]
-}
-
-func (it *iter) End() bool {
-	return it.cursor >= len(it.data)
 }
 
 func isNodeInRange(n *node, lower, upper int64) bool {

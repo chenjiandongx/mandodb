@@ -2,7 +2,6 @@ package storage
 
 import (
 	"bytes"
-	"encoding/binary"
 	"time"
 
 	"github.com/chenjiandongx/logger"
@@ -11,6 +10,7 @@ import (
 	"github.com/chenjiandongx/mandodb/lib/mmap"
 )
 
+// diskSegment 持久化 segment 磁盘数据使用 mmap 的方式按需加载
 type diskSegment struct {
 	dataFd       *mmap.MmapFile
 	dataFilename string
@@ -63,6 +63,7 @@ func (ds *diskSegment) shift() uint64 {
 }
 
 func (ds *diskSegment) Load() Segment {
+	// 仅加载一次即可
 	if ds.load {
 		return ds
 	}
@@ -76,7 +77,10 @@ func (ds *diskSegment) Load() Segment {
 		return ds
 	}
 
-	ds.metaSize = binary.LittleEndian.Uint64(dst)
+	decf := newDecbuf()
+	decf.UnmarshalUint64(dst)
+	ds.metaSize = decf.UnmarshalUint64(dst)
+
 	metaBytes := make([]byte, ds.metaSize)
 	_, err = reader.ReadAt(metaBytes, uint64Size)
 	if err != nil {
@@ -106,7 +110,7 @@ func (ds *diskSegment) Load() Segment {
 }
 
 func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
-	return nil, nil, nil
+	panic("BUG: disk segments are not mutable")
 }
 
 func (ds *diskSegment) QueryLabelValues(label string) []string {

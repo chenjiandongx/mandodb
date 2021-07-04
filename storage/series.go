@@ -2,6 +2,7 @@ package storage
 
 import (
 	"math"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -74,43 +75,26 @@ func (store *tszStore) MergeOutdatedList(lst sortedlist.List) *tszStore {
 	}
 
 	news := &tszStore{}
-
-	l1 := store.block.Iter()
-	l2 := lst.All()
-	for l1.Next() && l2.Next() {
-		t1, v1 := l1.Values()
-
-		dp := l2.Value().(DataPoint)
-		t2, v2 := dp.Ts, dp.Value
-
-		if int64(t1) <= t2 {
-			news.Append(&DataPoint{Ts: int64(t1), Value: v1})
-			l1.Next()
-		} else {
-			news.Append(&DataPoint{Ts: t2, Value: v2})
-			l2.Next()
-		}
+	tmp := make([]*DataPoint, 0)
+	it1 := store.block.Iter()
+	for it1.Next() {
+		t1, v1 := it1.Values()
+		tmp = append(tmp, &DataPoint{Ts: int64(t1), Value: v1})
 	}
 
-	if !l2.End() {
-		for {
-			dp := l2.Value().(DataPoint)
-			t2, v2 := dp.Ts, dp.Value
-			news.Append(&DataPoint{Ts: t2, Value: v2})
+	it2 := lst.All()
+	for it2.Next() {
+		dp := it2.Value().(DataPoint)
+		t2, v2 := dp.Ts, dp.Value
+		tmp = append(tmp, &DataPoint{Ts: t2, Value: v2})
+	}
 
-			if !l2.Next() {
-				break
-			}
-		}
-	} else {
-		for {
-			t1, v1 := l1.Values()
-			news.Append(&DataPoint{Ts: int64(t1), Value: v1})
+	sort.Slice(tmp, func(i, j int) bool {
+		return tmp[i].Ts < tmp[j].Ts
+	})
 
-			if !l1.Next() {
-				break
-			}
-		}
+	for i := 0; i < len(tmp); i++ {
+		news.Append(tmp[i])
 	}
 
 	return news

@@ -30,6 +30,7 @@ type tsdbOptions struct {
 	writeTimeout    time.Duration
 	segmentDuration time.Duration
 	onlyMemoryMode  bool
+	enableOutdated  bool
 }
 
 var globalOpts = &tsdbOptions{
@@ -39,6 +40,7 @@ var globalOpts = &tsdbOptions{
 	writeTimeout:    30 * time.Second,
 	segmentDuration: 1 * time.Hour,
 	onlyMemoryMode:  false,
+	enableOutdated:  true,
 }
 
 type Option func(c *tsdbOptions)
@@ -96,17 +98,27 @@ func WithOnlyMemoryMode(memoryMode bool) Option {
 	}
 }
 
+// WithEnabledOutdated 设置是否支持乱序写入 此特性会增加资源开销 但会提升数据完整性
+// 默认为 true
+func WithEnabledOutdated(outdated bool) Option {
+	return func(c *tsdbOptions) {
+		c.enableOutdated = outdated
+	}
+}
+
 const (
 	separator         = "/-/"
 	defaultQSize      = 64
 	defaultWriteBatch = 256
 )
 
+// DataPoint 表示一个数据点
 type DataPoint struct {
 	Ts    int64
 	Value float64
 }
 
+// ToInterface 用于转换数据点成 Prometheus 定义的类型
 func (dp DataPoint) ToInterface() [2]interface{} {
 	return [2]interface{}{dp.Ts, fmt.Sprintf("%f", dp.Value)}
 }
@@ -119,18 +131,16 @@ func filePrefix(a, b int64) string {
 	return fmt.Sprintf("seg-%d-%d.", a, b)
 }
 
+// Row 一行时序数据 包括数据点和标签组合
 type Row struct {
 	Metric    string
 	Labels    LabelSet
 	DataPoint DataPoint
 }
 
-func (r Row) M() uint64 {
-	return xxhash.Sum64([]byte(r.Metric))
-}
-
+// ID 使用 hash 计算 Series 的唯一标识
 func (r Row) ID() string {
-	return joinSeparator(r.M(), r.Labels.Hash())
+	return joinSeparator(xxhash.Sum64([]byte(r.Metric)), r.Labels.Hash())
 }
 
 type MetricRet struct {
@@ -178,6 +188,7 @@ func (tsdb *TSDB) ingestRows(ctx context.Context) {
 				rows = append(rows, rs[i])
 			}
 
+			// 按 batch 写入可以较少锁的调用次数
 			if len(rows) >= defaultWriteBatch {
 				head, err := tsdb.getHeadPartition()
 				if err != nil {

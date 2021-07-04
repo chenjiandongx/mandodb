@@ -62,11 +62,11 @@ func (ms *memorySegment) inRange(t int64) bool {
 }
 
 func (ms *memorySegment) MinTs() int64 {
-	return ms.minTs
+	return atomic.LoadInt64(&ms.minTs)
 }
 
 func (ms *memorySegment) MaxTs() int64 {
-	return ms.maxTs
+	return atomic.LoadInt64(&ms.maxTs)
 }
 
 func (ms *memorySegment) Frozen() bool {
