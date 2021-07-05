@@ -7,7 +7,7 @@ import (
 	"github.com/RoaringBitmap/roaring"
 )
 
-// Memory Index
+// Memory Index 负责管理内存索引的存储和搜索
 
 type memorySidSet struct {
 	set map[string]struct{}
@@ -142,7 +142,7 @@ func (mim *memoryIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []stri
 	return sids.List()
 }
 
-// Disk Index
+// Disk Index 负责管理磁盘的索引存储和搜索
 
 type diskSidSet struct {
 	set *roaring.Bitmap
@@ -225,7 +225,7 @@ func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []uint32
 			temp = append(temp, didx.set)
 		}
 
-		union := roaring.ParOr(2, temp...)
+		union := roaring.ParOr(4, temp...)
 		if union.IsEmpty() {
 			return nil
 		}
@@ -233,5 +233,5 @@ func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []uint32
 		lst = append(lst, union)
 	}
 
-	return roaring.ParAnd(2, lst...).ToArray()
+	return roaring.ParAnd(4, lst...).ToArray()
 }

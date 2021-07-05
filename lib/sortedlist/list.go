@@ -12,9 +12,16 @@ func NewTree() List {
 
 // List 实现了排序链表的数据结构
 type List interface {
+	// Remove 移除节点
 	Remove(key int64) (interface{}, bool)
+
+	// Add 新增节点
 	Add(key int64, data interface{})
+
+	// Range 过滤范围内的 key 并返回 Iter 对象
 	Range(lower, upper int64) Iter
+
+	// All 迭代所有对象
 	All() Iter
 }
 
@@ -145,6 +152,7 @@ func (t *tree) All() Iter {
 	return t.Range(0, math.MaxInt64)
 }
 
+// Range 实际上这里是一个伪 Iter 并不是真正意义上的迭代器 因为其内部已经把所有数据读出来了
 func (t *tree) Range(lower, upper int64) Iter {
 	it := &iter{data: []interface{}{nil}}
 	if t.root == nil {

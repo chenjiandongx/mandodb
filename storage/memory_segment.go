@@ -74,7 +74,9 @@ func (ms *memorySegment) Frozen() bool {
 		return false
 	}
 
-	return ms.MaxTs()-ms.MinTs() >= int64(globalOpts.segmentDuration.Seconds())
+	return atomic.LoadInt64(&ms.dataPointsCount) >= globalOpts.maxRowsPerSegment
+
+	return ms.MaxTs()-ms.MinTs() > int64(globalOpts.segmentDuration.Seconds())
 }
 
 func (ms *memorySegment) QueryLabelValues(label string) []string {

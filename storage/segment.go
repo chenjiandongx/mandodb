@@ -80,7 +80,7 @@ func (sl *SegmentList) Choose(seg Segment, start, end int64) bool {
 }
 
 func (sl *SegmentList) Add(segment Segment) {
-	sl.lst.Add(segment.MaxTs(), segment)
+	sl.lst.Add(segment.MinTs(), segment)
 }
 
 func (sl *SegmentList) Remove(segment Segment) {

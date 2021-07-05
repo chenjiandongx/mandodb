@@ -24,23 +24,25 @@ import (
 // * WAL 做灾备
 
 type tsdbOptions struct {
-	metaSerializer  MetaSerializer
-	bytesCompressor BytesCompressor
-	listenAddr      string
-	writeTimeout    time.Duration
-	segmentDuration time.Duration
-	onlyMemoryMode  bool
-	enableOutdated  bool
+	metaSerializer    MetaSerializer
+	bytesCompressor   BytesCompressor
+	listenAddr        string
+	writeTimeout      time.Duration
+	segmentDuration   time.Duration
+	onlyMemoryMode    bool
+	enableOutdated    bool
+	maxRowsPerSegment int64
 }
 
 var globalOpts = &tsdbOptions{
-	metaSerializer:  newBinaryMetaSerializer(),
-	bytesCompressor: newNoopBytesCompressor(),
-	listenAddr:      "0.0.0.0:8789",
-	writeTimeout:    30 * time.Second,
-	segmentDuration: 1 * time.Hour,
-	onlyMemoryMode:  false,
-	enableOutdated:  true,
+	metaSerializer:    newBinaryMetaSerializer(),
+	bytesCompressor:   newNoopBytesCompressor(),
+	listenAddr:        "0.0.0.0:8789",
+	writeTimeout:      30 * time.Second,
+	segmentDuration:   1 * time.Hour,
+	onlyMemoryMode:    false,
+	enableOutdated:    true,
+	maxRowsPerSegment: 2e8,
 }
 
 type Option func(c *tsdbOptions)
@@ -103,6 +105,14 @@ func WithOnlyMemoryMode(memoryMode bool) Option {
 func WithEnabledOutdated(outdated bool) Option {
 	return func(c *tsdbOptions) {
 		c.enableOutdated = outdated
+	}
+}
+
+// WithMaxRowsPerSegment 设置单 segment 最大允许存储的点数
+// 默认为 5e8
+func WithMaxRowsPerSegment(n int64) Option {
+	return func(c *tsdbOptions) {
+		c.maxRowsPerSegment = n
 	}
 }
 
@@ -221,9 +231,10 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 		head := tsdb.segs.head
 
 		go func() {
-			// TODO: 这里可以先把它加入到 segs 中 作为 memory segment 等写完再删除对象
 			tsdb.wg.Add(1)
 			defer tsdb.wg.Done()
+
+			tsdb.segs.Add(head)
 
 			t0 := time.Now()
 			prefix := filePrefix(head.MinTs(), head.MaxTs())
@@ -239,6 +250,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 				return
 			}
 
+			tsdb.segs.Remove(head)
 			tsdb.segs.Add(newDiskSegment(mf, prefix+"meta", head.MinTs(), head.MaxTs()))
 			logger.Infof("write file %s take: %v", fname, time.Since(t0))
 		}()
@@ -260,8 +272,6 @@ type QueryRangeOptions struct {
 }
 
 func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) ([]MetricRet, error) {
-	tsdb.wg.Wait()
-
 	labels = labels.AddMetricName(metric)
 
 	temp := make([]MetricRet, 0)
@@ -306,8 +316,6 @@ func (tsdb *TSDB) mergeQueryRangeResult(ret ...MetricRet) []MetricRet {
 }
 
 func (tsdb *TSDB) QuerySeries(labels LabelSet, start, end int64) ([]map[string]string, error) {
-	tsdb.wg.Wait()
-
 	temp := make([]LabelSet, 0)
 	for _, segment := range tsdb.segs.Get(start, end) {
 		segment = segment.Load()
