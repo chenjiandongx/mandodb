@@ -42,7 +42,7 @@ var globalOpts = &tsdbOptions{
 	segmentDuration:   1 * time.Hour,
 	onlyMemoryMode:    false,
 	enableOutdated:    true,
-	maxRowsPerSegment: 2e8,
+	maxRowsPerSegment: 2e7,
 }
 
 type Option func(c *tsdbOptions)

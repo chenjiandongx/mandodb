@@ -14,7 +14,6 @@ import (
 type diskSegment struct {
 	dataFd       *mmap.MmapFile
 	dataFilename string
-	metaSize     uint64
 	load         bool
 
 	labelVs  *labelValueSet
@@ -59,7 +58,7 @@ func (ds *diskSegment) Close() error {
 }
 
 func (ds *diskSegment) shift() uint64 {
-	return ds.metaSize + uint64Size
+	return uint64Size * 2
 }
 
 func (ds *diskSegment) Load() Segment {
@@ -70,19 +69,31 @@ func (ds *diskSegment) Load() Segment {
 
 	t0 := time.Now()
 	reader := bytes.NewReader(ds.dataFd.Bytes())
-	dst := make([]byte, uint64Size)
-	_, err := reader.ReadAt(dst, 0)
+
+	// 读取 dataBytes 长度
+	dataSizeBs := make([]byte, uint64Size)
+	_, err := reader.ReadAt(dataSizeBs, 0)
+	if err != nil {
+		logger.Errorf("failed to read %s data-size: %v", ds.dataFilename, err)
+		return ds
+	}
+	decf := newDecbuf()
+	decf.UnmarshalUint64(dataSizeBs)
+	dataSize := decf.UnmarshalUint64(dataSizeBs)
+
+	// 读取 metaBytes 长度
+	metaSizeBs := make([]byte, uint64Size)
+	_, err = reader.ReadAt(metaSizeBs, uint64Size)
 	if err != nil {
 		logger.Errorf("failed to read %s meta-size: %v", ds.dataFilename, err)
 		return ds
 	}
+	decf = newDecbuf()
+	decf.UnmarshalUint64(metaSizeBs)
+	metaSize := decf.UnmarshalUint64(metaSizeBs)
 
-	decf := newDecbuf()
-	decf.UnmarshalUint64(dst)
-	ds.metaSize = decf.UnmarshalUint64(dst)
-
-	metaBytes := make([]byte, ds.metaSize)
-	_, err = reader.ReadAt(metaBytes, uint64Size)
+	metaBytes := make([]byte, metaSize)
+	_, err = reader.ReadAt(metaBytes, uint64Size*2+int64(dataSize))
 	if err != nil {
 		logger.Errorf("failed to read %s meta-bytes: %v", ds.dataFilename, err)
 		return ds

@@ -74,6 +74,7 @@ func (ms *memorySegment) Frozen() bool {
 		return false
 	}
 
+	// TODO: 临时操作
 	return atomic.LoadInt64(&ms.dataPointsCount) >= globalOpts.maxRowsPerSegment
 
 	return ms.MaxTs()-ms.MinTs() > int64(globalOpts.segmentDuration.Seconds())
@@ -181,6 +182,9 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	size := 0
 
 	dataBuf := make([]byte, 0)
+
+	// 占位符 用于后面标记 dataBytes / metaBytes 长度
+	dataBuf = append(dataBuf, make([]byte, uint64Size*2)...)
 	meta := Metadata{MinTs: ms.minTs, MaxTs: ms.maxTs}
 
 	// key: sid
@@ -235,6 +239,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	metalen := len(metaBytes)
 
 	desc := &Desc{
 		SeriesCount:     ms.seriesCount,
@@ -245,12 +250,24 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 
 	descBytes, _ := json.MarshalIndent(desc, "", "    ")
 
-	encf := newEncbuf()
-	encf.MarshalUint64(uint64(len(metaBytes)))
-	encf.MarshalBytes(metaBytes)
-	encf.MarshalBytes(dataBuf)
+	dataLen := len(dataBuf) - (uint64Size * 2)
+	dataBuf = append(dataBuf, metaBytes...)
 
-	return encf.Bytes(), descBytes, nil
+	dataLenBuf := newEncbuf()
+	dataLenBuf.MarshalUint64(uint64(dataLen))
+	dataLenBs := dataLenBuf.Bytes()
+	for i := 0; i < uint64Size; i++ {
+		dataBuf[i] = dataLenBs[i]
+	}
+
+	metaLenBuf := newEncbuf()
+	metaLenBuf.MarshalUint64(uint64(metalen))
+	metaLenBs := metaLenBuf.Bytes()
+	for i := uint64Size; i < uint64Size*2; i++ {
+		dataBuf[i] = metaLenBs[i-uint64Size]
+	}
+
+	return dataBuf, descBytes, nil
 }
 
 func writeToDisk(segment Segment) error {
