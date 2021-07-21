@@ -24,6 +24,7 @@ import (
 type tsdbOptions struct {
 	metaSerializer    MetaSerializer
 	bytesCompressor   BytesCompressor
+	retention         time.Duration
 	segmentDuration   time.Duration
 	onlyMemoryMode    bool
 	enableOutdated    bool
@@ -35,6 +36,7 @@ var globalOpts = &tsdbOptions{
 	metaSerializer:    newBinaryMetaSerializer(),
 	bytesCompressor:   newNoopBytesCompressor(),
 	segmentDuration:   2 * time.Hour,
+	retention:         7 * 24 * time.Hour, // 7d
 	onlyMemoryMode:    false,
 	enableOutdated:    true,
 	maxRowsPerSegment: 19960412,
@@ -101,6 +103,14 @@ func WithMaxRowsPerSegment(n int64) Option {
 func WithDataPath(d string) Option {
 	return func(c *tsdbOptions) {
 		c.dataPath = d
+	}
+}
+
+// WithRetention 设置 Segment 持久化数据保存时长
+// 默认为 7d
+func WithRetention(t time.Duration) Option {
+	return func(c *tsdbOptions) {
+		c.retention = t
 	}
 }
 
@@ -322,6 +332,30 @@ func (tsdb *TSDB) Close() {
 	tsdb.segs.head.Close()
 }
 
+func (tsdb *TSDB) removeExpires() {
+	tick := time.Tick(5 * time.Minute)
+	for {
+		select {
+		case <-tsdb.ctx.Done():
+			return
+		case <-tick:
+			now := time.Now().Unix()
+
+			var removed []Segment
+			it := tsdb.segs.lst.All()
+			for it.Next() {
+				if now-it.Value().(Segment).MaxTs() > int64(globalOpts.retention.Seconds()) {
+					removed = append(removed, it.Value().(Segment))
+				}
+			}
+
+			for _, r := range removed {
+				tsdb.segs.Remove(r)
+			}
+		}
+	}
+}
+
 func (tsdb *TSDB) loadFiles() {
 	err := filepath.Walk(globalOpts.dataPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -396,6 +430,7 @@ func OpenTSDB(opts ...Option) *TSDB {
 	for i := 0; i < worker; i++ {
 		go tsdb.ingestRows(tsdb.ctx)
 	}
+	go tsdb.removeExpires()
 
 	return tsdb
 }

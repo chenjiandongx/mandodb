@@ -83,6 +83,7 @@ func (sl *segmentList) Add(segment Segment) {
 }
 
 func (sl *segmentList) Remove(segment Segment) {
+	segment.Close()
 	sl.lst.Remove(segment.MinTs())
 }
 

@@ -2,6 +2,7 @@ package mandodb
 
 import (
 	"bytes"
+	"sync"
 	"time"
 
 	"github.com/chenjiandongx/logger"
@@ -16,6 +17,7 @@ type diskSegment struct {
 	dataFilename string
 	load         bool
 
+	wg       sync.WaitGroup
 	labelVs  *labelValueSet
 	indexMap *diskIndexMap
 	series   []metaSeries
@@ -54,6 +56,7 @@ func (ds *diskSegment) Type() SegmentType {
 }
 
 func (ds *diskSegment) Close() error {
+	ds.wg.Wait() // 确保没有进程在使用 fd
 	return ds.dataFd.Close()
 }
 
@@ -140,6 +143,9 @@ func (ds *diskSegment) QuerySeries(lms LabelMatcherSet) ([]LabelSet, error) {
 }
 
 func (ds *diskSegment) QueryRange(lms LabelMatcherSet, start, end int64) ([]MetricRet, error) {
+	ds.wg.Add(1)
+	defer ds.wg.Done()
+
 	sids := ds.indexMap.MatchSids(ds.labelVs, lms)
 
 	ret := make([]MetricRet, 0)
