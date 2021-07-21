@@ -26,6 +26,7 @@ type tsdbOptions struct {
 	bytesCompressor   BytesCompressor
 	retention         time.Duration
 	segmentDuration   time.Duration
+	writeTimeout      time.Duration
 	onlyMemoryMode    bool
 	enableOutdated    bool
 	maxRowsPerSegment int64
@@ -37,6 +38,7 @@ var globalOpts = &tsdbOptions{
 	bytesCompressor:   newNoopBytesCompressor(),
 	segmentDuration:   2 * time.Hour,
 	retention:         7 * 24 * time.Hour, // 7d
+	writeTimeout:      30 * time.Second,
 	onlyMemoryMode:    false,
 	enableOutdated:    true,
 	maxRowsPerSegment: 19960412,
@@ -114,6 +116,14 @@ func WithRetention(t time.Duration) Option {
 	}
 }
 
+// WithWriteTimeout 设置写入超时阈值
+// 默认为 30s
+func WithWriteTimeout(t time.Duration) Option {
+	return func(c *tsdbOptions) {
+		c.writeTimeout = t
+	}
+}
+
 const (
 	separator    = "/-/"
 	defaultQSize = 128
@@ -156,10 +166,37 @@ type TSDB struct {
 	wg sync.WaitGroup
 }
 
+var timerPool sync.Pool
+
+func getTimer(d time.Duration) *time.Timer {
+	if v := timerPool.Get(); v != nil {
+		t := v.(*time.Timer)
+		if t.Reset(d) {
+			panic("active timer trapped to the pool")
+		}
+		return t
+	}
+	return time.NewTimer(d)
+}
+
+func putTimer(t *time.Timer) {
+	if !t.Stop() {
+		// Drain t.C if it wasn't obtained by the caller yet.
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	timerPool.Put(t)
+}
+
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
+	timer := getTimer(globalOpts.writeTimeout)
 	select {
 	case tsdb.q <- rows:
-	default:
+		putTimer(timer)
+	case <-timer.C:
+		putTimer(timer)
 		return errors.New("failed to insert rows to database, write overloaded")
 	}
 
