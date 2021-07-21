@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"math"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/dgryski/go-tsz"
 
-	"github.com/chenjiandongx/mandodb/lib/sortedlist"
+	"github.com/chenjiandongx/mandodb/pkg/sortedlist"
 )
 
 type tszStore struct {
@@ -18,7 +18,7 @@ type tszStore struct {
 	count int64
 }
 
-func (store *tszStore) Append(point *DataPoint) *DataPoint {
+func (store *tszStore) Append(point *Point) *Point {
 	store.lock.Lock()
 	defer store.lock.Unlock()
 
@@ -39,8 +39,8 @@ func (store *tszStore) Append(point *DataPoint) *DataPoint {
 	return nil
 }
 
-func (store *tszStore) Get(start, end int64) []DataPoint {
-	points := make([]DataPoint, 0)
+func (store *tszStore) Get(start, end int64) []Point {
+	points := make([]Point, 0)
 
 	it := store.block.Iter()
 	for it.Next() {
@@ -50,14 +50,14 @@ func (store *tszStore) Get(start, end int64) []DataPoint {
 		}
 
 		if ts >= uint32(start) {
-			points = append(points, DataPoint{Ts: int64(ts), Value: val})
+			points = append(points, Point{Ts: int64(ts), Value: val})
 		}
 	}
 
 	return points
 }
 
-func (store *tszStore) All() []DataPoint {
+func (store *tszStore) All() []Point {
 	return store.Get(math.MinInt64, math.MaxInt64)
 }
 
@@ -78,9 +78,8 @@ func (store *tszStore) MergeOutdatedList(lst sortedlist.List) *tszStore {
 	tmp := store.All()
 	it := lst.All()
 	for it.Next() {
-		dp := it.Value().(DataPoint)
-		t2, v2 := dp.Ts, dp.Value
-		tmp = append(tmp, DataPoint{Ts: t2, Value: v2})
+		dp := it.Value().(Point)
+		tmp = append(tmp, Point{Ts: dp.Ts, Value: dp.Value})
 	}
 
 	sort.Slice(tmp, func(i, j int) bool {

@@ -1,16 +1,16 @@
-package storage
+package mandodb
 
 import (
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"sort"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/chenjiandongx/mandodb/lib/sortedlist"
+	"github.com/chenjiandongx/mandodb/pkg/sortedlist"
 )
 
 type memorySegment struct {
@@ -23,10 +23,8 @@ type memorySegment struct {
 
 	labelVs *labelValueSet
 
-	rangeStart int64
-	rangeEnd   int64
-	minTs      int64
-	maxTs      int64
+	minTs int64
+	maxTs int64
 
 	seriesCount     int64
 	dataPointsCount int64
@@ -34,13 +32,11 @@ type memorySegment struct {
 
 func newMemorySegment() Segment {
 	return &memorySegment{
-		indexMap:   newMemoryIndexMap(),
-		labelVs:    newLabelValueSet(),
-		outdated:   make(map[string]sortedlist.List),
-		rangeStart: time.Now().Unix(),
-		rangeEnd:   time.Now().Unix() + int64(globalOpts.segmentDuration.Seconds()),
-		minTs:      math.MaxInt64,
-		maxTs:      math.MinInt64,
+		indexMap: newMemoryIndexMap(),
+		labelVs:  newLabelValueSet(),
+		outdated: make(map[string]sortedlist.List),
+		minTs:    math.MaxInt64,
+		maxTs:    math.MinInt64,
 	}
 }
 
@@ -57,10 +53,6 @@ func (ms *memorySegment) getOrCreateSeries(row *Row) *memorySeries {
 	return newSeries
 }
 
-func (ms *memorySegment) inRange(t int64) bool {
-	return t >= ms.rangeStart && ms.rangeEnd >= t && t <= time.Now().Unix()+120
-}
-
 func (ms *memorySegment) MinTs() int64 {
 	return atomic.LoadInt64(&ms.minTs)
 }
@@ -73,9 +65,6 @@ func (ms *memorySegment) Frozen() bool {
 	if globalOpts.onlyMemoryMode {
 		return false
 	}
-
-	// TODO: 临时操作
-	return atomic.LoadInt64(&ms.dataPointsCount) >= globalOpts.maxRowsPerSegment
 
 	return ms.MaxTs()-ms.MinTs() > int64(globalOpts.segmentDuration.Seconds())
 }
@@ -111,30 +100,30 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		row.Labels.Sorted()
 		series := ms.getOrCreateSeries(row)
 
-		dp := series.Append(&row.DataPoint)
+		dp := series.Append(&row.Point)
 
 		if dp != nil {
 			ms.outdatedMut.Lock()
 			if _, ok := ms.outdated[row.ID()]; !ok {
 				ms.outdated[row.ID()] = sortedlist.NewTree()
 			}
-			ms.outdated[row.ID()].Add(row.DataPoint.Ts, row.DataPoint)
+			ms.outdated[row.ID()].Add(row.Point.Ts, row.Point)
 			ms.outdatedMut.Unlock()
 		}
 
-		if atomic.LoadInt64(&ms.minTs) >= row.DataPoint.Ts {
-			atomic.StoreInt64(&ms.minTs, row.DataPoint.Ts)
+		if atomic.LoadInt64(&ms.minTs) >= row.Point.Ts {
+			atomic.StoreInt64(&ms.minTs, row.Point.Ts)
 		}
-		if atomic.LoadInt64(&ms.maxTs) <= row.DataPoint.Ts {
-			atomic.StoreInt64(&ms.maxTs, row.DataPoint.Ts)
+		if atomic.LoadInt64(&ms.maxTs) <= row.Point.Ts {
+			atomic.StoreInt64(&ms.maxTs, row.Point.Ts)
 		}
 		atomic.AddInt64(&ms.dataPointsCount, 1)
 		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
 	}
 }
 
-func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
-	matchSids := ms.indexMap.MatchSids(ms.labelVs, labels)
+func (ms *memorySegment) QuerySeries(lms LabelMatcherSet) ([]LabelSet, error) {
+	matchSids := ms.indexMap.MatchSids(ms.labelVs, lms)
 	ret := make([]LabelSet, 0)
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
@@ -146,29 +135,28 @@ func (ms *memorySegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
 	return ret, nil
 }
 
-func (ms *memorySegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	matchSids := ms.indexMap.MatchSids(ms.labelVs, labels)
+func (ms *memorySegment) QueryRange(lms LabelMatcherSet, start, end int64) ([]MetricRet, error) {
+	matchSids := ms.indexMap.MatchSids(ms.labelVs, lms)
 	ret := make([]MetricRet, 0, len(matchSids))
 	for _, sid := range matchSids {
 		b, _ := ms.segment.Load(sid)
 		series := b.(*memorySeries)
 
-		dps := series.Get(start, end)
+		points := series.Get(start, end)
 
 		ms.outdatedMut.Lock()
 		v, ok := ms.outdated[sid]
 		if ok {
 			iter := v.Range(start, end)
 			for iter.Next() {
-				dps = append(dps, iter.Value().(DataPoint))
+				points = append(points, iter.Value().(Point))
 			}
-
 		}
 		ms.outdatedMut.Unlock()
 
 		ret = append(ret, MetricRet{
-			Labels:     series.labels,
-			DataPoints: dps,
+			Labels: series.labels,
+			Points: points,
 		})
 	}
 
@@ -230,7 +218,9 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 			l = append(l, sids[s])
 		}
 
-		sort.Slice(l, func(i, j int) bool { return l[i] < l[j] })
+		sort.Slice(l, func(i, j int) bool {
+			return l[i] < l[j]
+		})
 		labelIdx = append(labelIdx, seriesWithLabel{Name: key, Sids: l})
 	})
 	meta.Labels = labelIdx
@@ -256,21 +246,28 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	dataLenBuf := newEncbuf()
 	dataLenBuf.MarshalUint64(uint64(dataLen))
 	dataLenBs := dataLenBuf.Bytes()
-	for i := 0; i < uint64Size; i++ {
-		dataBuf[i] = dataLenBs[i]
-	}
+	copy(dataBuf[:uint64Size], dataLenBs[:uint64Size])
 
 	metaLenBuf := newEncbuf()
 	metaLenBuf.MarshalUint64(uint64(metalen))
 	metaLenBs := metaLenBuf.Bytes()
-	for i := uint64Size; i < uint64Size*2; i++ {
-		dataBuf[i] = metaLenBs[i-uint64Size]
-	}
+	copy(dataBuf[uint64Size:uint64Size*2], metaLenBs[:uint64Size])
 
 	return dataBuf, descBytes, nil
 }
 
-func writeToDisk(segment Segment) error {
+func mkdir(d string) {
+	d = path.Join(globalOpts.dataPath, d)
+	if _, err := os.Stat(d); !os.IsNotExist(err) {
+		return
+	}
+
+	if err := os.MkdirAll(d, os.ModePerm); err != nil {
+		panic(fmt.Sprintf("BUG: failed to create dir: %s", d))
+	}
+}
+
+func writeToDisk(segment *memorySegment) error {
 	dataBytes, descBytes, err := segment.Marshal()
 	if err != nil {
 		return fmt.Errorf("failed to marshal segment: %s", err.Error())
@@ -278,25 +275,28 @@ func writeToDisk(segment Segment) error {
 
 	writeFile := func(f string, data []byte) error {
 		if isFileExist(f) {
-			return fmt.Errorf("%s file is exist", f)
+			return fmt.Errorf("%s file is already exists", f)
 		}
 
-		metaFd, err := os.OpenFile(f, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+		fd, err := os.OpenFile(f, os.O_CREATE|os.O_WRONLY, os.ModePerm)
 		if err != nil {
 			return err
 		}
-		defer metaFd.Close()
+		defer fd.Close()
 
-		_, err = metaFd.Write(data)
+		_, err = fd.Write(data)
 		return err
 	}
 
-	prefix := filePrefix(segment.MinTs(), segment.MaxTs())
-	if err := writeFile(prefix+"data", dataBytes); err != nil {
+	dn := dirname(segment.MinTs(), segment.MaxTs())
+	mkdir(dn)
+
+	if err := writeFile(path.Join(dn, "data"), dataBytes); err != nil {
 		return err
 	}
 
-	if err := writeFile(prefix+"json", descBytes); err != nil {
+	// 这里的 meta.json 只是描述了一些简单的信息 并非全局定义的 MetaData
+	if err := writeFile(path.Join(dn, "meta.json"), descBytes); err != nil {
 		return err
 	}
 

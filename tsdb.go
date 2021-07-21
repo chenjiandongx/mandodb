@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"context"
@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -15,34 +18,27 @@ import (
 	"github.com/cespare/xxhash"
 	"github.com/chenjiandongx/logger"
 
-	"github.com/chenjiandongx/mandodb/lib/mmap"
-	"github.com/chenjiandongx/mandodb/lib/timerpool"
+	"github.com/chenjiandongx/mandodb/pkg/mmap"
 )
-
-// TODO: list
-// * 磁盘文件合并 参考 leveldb
-// * WAL 做灾备
 
 type tsdbOptions struct {
 	metaSerializer    MetaSerializer
 	bytesCompressor   BytesCompressor
-	listenAddr        string
-	writeTimeout      time.Duration
 	segmentDuration   time.Duration
 	onlyMemoryMode    bool
 	enableOutdated    bool
 	maxRowsPerSegment int64
+	dataPath          string
 }
 
 var globalOpts = &tsdbOptions{
 	metaSerializer:    newBinaryMetaSerializer(),
 	bytesCompressor:   newNoopBytesCompressor(),
-	listenAddr:        "0.0.0.0:8789",
-	writeTimeout:      30 * time.Second,
-	segmentDuration:   1 * time.Hour,
+	segmentDuration:   2 * time.Hour,
 	onlyMemoryMode:    false,
 	enableOutdated:    true,
-	maxRowsPerSegment: 2e7,
+	maxRowsPerSegment: 19960412,
+	dataPath:          ".",
 }
 
 type Option func(c *tsdbOptions)
@@ -60,8 +56,8 @@ func WithMetaSerializerType(t MetaSerializerType) Option {
 
 // WithMetaBytesCompressorType 设置字节数据的压缩算法
 // 目前提供了
-// * 不压缩: NoopBytesCompressor
-// * ZSTD: ZstdBytesCompressor（默认）
+// * 不压缩: NoopBytesCompressor（默认）
+// * ZSTD: ZstdBytesCompressor
 // * Snappy: SnappyBytesCompressor
 func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 	return func(c *tsdbOptions) {
@@ -73,22 +69,6 @@ func WithMetaBytesCompressorType(t BytesCompressorType) Option {
 		default: // noop
 			c.bytesCompressor = newNoopBytesCompressor()
 		}
-	}
-}
-
-// WithListenAddr 设置 TSDB HTTP 服务监听地址
-// 默认为 0.0.0.0:8789
-func WithListenAddr(addr string) Option {
-	return func(c *tsdbOptions) {
-		c.listenAddr = addr
-	}
-}
-
-// WithWriteTimeout 设置写超时阈值
-// 默认为 30s
-func WithWriteTimeout(t time.Duration) Option {
-	return func(c *tsdbOptions) {
-		c.writeTimeout = t
 	}
 }
 
@@ -108,44 +88,46 @@ func WithEnabledOutdated(outdated bool) Option {
 	}
 }
 
-// WithMaxRowsPerSegment 设置单 segment 最大允许存储的点数
-// 默认为 5e8
+// WithMaxRowsPerSegment 设置单 Segment 最大允许存储的点数
+// 默认为 19960412
 func WithMaxRowsPerSegment(n int64) Option {
 	return func(c *tsdbOptions) {
 		c.maxRowsPerSegment = n
 	}
 }
 
-const (
-	separator         = "/-/"
-	defaultQSize      = 64
-	defaultWriteBatch = 256
-)
-
-// DataPoint 表示一个数据点
-type DataPoint struct {
-	Ts    int64
-	Value float64
+// WithDataPath 设置 Segment 持久化存储文件夹
+// 默认为 "."
+func WithDataPath(d string) Option {
+	return func(c *tsdbOptions) {
+		c.dataPath = d
+	}
 }
 
-// ToInterface 用于转换数据点成 Prometheus 定义的类型
-func (dp DataPoint) ToInterface() [2]interface{} {
-	return [2]interface{}{dp.Ts, fmt.Sprintf("%f", dp.Value)}
+const (
+	separator    = "/-/"
+	defaultQSize = 128
+)
+
+// Point 表示一个数据点 (ts, value) 二元组
+type Point struct {
+	Ts    int64
+	Value float64
 }
 
 func joinSeparator(a, b interface{}) string {
 	return fmt.Sprintf("%v%s%v", a, separator, b)
 }
 
-func filePrefix(a, b int64) string {
-	return fmt.Sprintf("seg-%d-%d.", a, b)
+func dirname(a, b int64) string {
+	return path.Join(globalOpts.dataPath, fmt.Sprintf("seg-%d-%d", a, b))
 }
 
 // Row 一行时序数据 包括数据点和标签组合
 type Row struct {
-	Metric    string
-	Labels    LabelSet
-	DataPoint DataPoint
+	Metric string
+	Labels LabelSet
+	Point  Point
 }
 
 // ID 使用 hash 计算 Series 的唯一标识
@@ -153,15 +135,9 @@ func (r Row) ID() string {
 	return joinSeparator(xxhash.Sum64([]byte(r.Metric)), r.Labels.Hash())
 }
 
-type MetricRet struct {
-	Labels     []Label
-	DataPoints []DataPoint
-}
-
 type TSDB struct {
-	segs *SegmentList
+	segs *segmentList
 	mut  sync.Mutex
-	srv  *server
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -171,54 +147,28 @@ type TSDB struct {
 }
 
 func (tsdb *TSDB) InsertRows(rows []*Row) error {
-	t := timerpool.Get(globalOpts.writeTimeout)
-
 	select {
 	case tsdb.q <- rows:
-		timerpool.Put(t)
-	case <-t.C:
-		timerpool.Put(t)
-		return errors.New("failed to insert rows to database, write timeout")
+	default:
+		return errors.New("failed to insert rows to database, write overloaded")
 	}
 
 	return nil
 }
 
 func (tsdb *TSDB) ingestRows(ctx context.Context) {
-	rows := make([]*Row, 0, defaultWriteBatch)
-	tick := time.Tick(200 * time.Millisecond)
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
 		case rs := <-tsdb.q:
-			for i := 0; i < len(rs); i++ {
-				rows = append(rows, rs[i])
-			}
-
-			// 按 batch 写入可以较少锁的调用次数
-			if len(rows) >= defaultWriteBatch {
-				head, err := tsdb.getHeadPartition()
-				if err != nil {
-					logger.Errorf("failed to get head partition: %v", head)
-					continue
-				}
-
-				head.InsertRows(rows)
-				rows = rows[:0]
-			}
-
-		case <-tick:
 			head, err := tsdb.getHeadPartition()
 			if err != nil {
 				logger.Errorf("failed to get head partition: %v", head)
 				continue
 			}
-
-			head.InsertRows(rows)
-			rows = rows[:0]
+			head.InsertRows(rs)
 		}
 	}
 }
@@ -237,13 +187,14 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 			tsdb.segs.Add(head)
 
 			t0 := time.Now()
-			prefix := filePrefix(head.MinTs(), head.MaxTs())
-			if err := writeToDisk(head); err != nil {
+			dn := dirname(head.MinTs(), head.MaxTs())
+
+			if err := writeToDisk(head.(*memorySegment)); err != nil {
 				logger.Errorf("failed to flush data to disk, %v", err)
 				return
 			}
 
-			fname := prefix + "data"
+			fname := path.Join(dn, "data")
 			mf, err := mmap.OpenMmapFile(fname)
 			if err != nil {
 				logger.Errorf("failed to make a mmap file %s, %v", fname, err)
@@ -251,7 +202,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 			}
 
 			tsdb.segs.Remove(head)
-			tsdb.segs.Add(newDiskSegment(mf, prefix+"meta", head.MinTs(), head.MaxTs()))
+			tsdb.segs.Add(newDiskSegment(mf, path.Join(dn, "meta.json"), head.MinTs(), head.MaxTs()))
 			logger.Infof("write file %s take: %v", fname, time.Since(t0))
 		}()
 
@@ -261,73 +212,69 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 	return tsdb.segs.head, nil
 }
 
-type QueryRangeOptions struct {
-	Metric  string   `json:"metric"`
-	Labels  LabelSet `json:"labels"`
-	Agg     string   `json:"agg"`
-	GroupBy string   `json:"groupBy"`
-	Start   int64    `json:"start"`
-	End     int64    `json:"end"`
-	Step    string   `json:"step"`
+type MetricRet struct {
+	Labels LabelSet
+	Points []Point
 }
 
-func (tsdb *TSDB) QueryRange(metric string, labels LabelSet, start, end int64) ([]MetricRet, error) {
-	labels = labels.AddMetricName(metric)
+func (tsdb *TSDB) QueryRange(metric string, lms LabelMatcherSet, start, end int64) ([]MetricRet, error) {
+	lms = lms.AddMetricName(metric)
 
-	temp := make([]MetricRet, 0)
+	tmp := make([]MetricRet, 0)
 	for _, segment := range tsdb.segs.Get(start, end) {
 		segment = segment.Load()
-		data, err := segment.QueryRange(labels, start, end)
+		data, err := segment.QueryRange(lms, start, end)
 		if err != nil {
 			return nil, err
 		}
 
-		temp = append(temp, data...)
+		tmp = append(tmp, data...)
 	}
 
-	return tsdb.mergeQueryRangeResult(temp...), nil
+	return tsdb.mergeQueryRangeResult(tmp...), nil
 }
 
 func (tsdb *TSDB) mergeQueryRangeResult(ret ...MetricRet) []MetricRet {
 	metrics := make(map[uint64]*MetricRet)
 	for _, r := range ret {
-		h := LabelSet(r.Labels).Hash()
+		h := r.Labels.Hash()
 		v, ok := metrics[h]
 		if !ok {
 			metrics[h] = &MetricRet{
-				Labels:     r.Labels,
-				DataPoints: r.DataPoints,
+				Labels: r.Labels,
+				Points: r.Points,
 			}
 			continue
 		}
 
-		v.DataPoints = append(v.DataPoints, r.DataPoints...)
+		v.Points = append(v.Points, r.Points...)
 	}
 
 	items := make([]MetricRet, 0, len(metrics))
 	for _, v := range metrics {
-		sort.Slice(v.DataPoints, func(i, j int) bool {
-			return v.DataPoints[i].Ts < v.DataPoints[j].Ts
+		sort.Slice(v.Points, func(i, j int) bool {
+			return v.Points[i].Ts < v.Points[j].Ts
 		})
+
 		items = append(items, *v)
 	}
 
 	return items
 }
 
-func (tsdb *TSDB) QuerySeries(labels LabelSet, start, end int64) ([]map[string]string, error) {
-	temp := make([]LabelSet, 0)
+func (tsdb *TSDB) QuerySeries(lms LabelMatcherSet, start, end int64) ([]map[string]string, error) {
+	tmp := make([]LabelSet, 0)
 	for _, segment := range tsdb.segs.Get(start, end) {
 		segment = segment.Load()
-		data, err := segment.QuerySeries(labels)
+		data, err := segment.QuerySeries(lms)
 		if err != nil {
 			return nil, err
 		}
 
-		temp = append(temp, data...)
+		tmp = append(tmp, data...)
 	}
 
-	return tsdb.mergeQuerySeriesResult(temp...), nil
+	return tsdb.mergeQuerySeriesResult(tmp...), nil
 }
 
 func (tsdb *TSDB) mergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
@@ -345,16 +292,16 @@ func (tsdb *TSDB) mergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
 }
 
 func (tsdb *TSDB) QueryLabelValues(label string, start, end int64) []string {
-	temp := make(map[string]struct{})
+	tmp := make(map[string]struct{})
 	for _, segment := range tsdb.segs.Get(start, end) {
 		values := segment.QueryLabelValues(label)
 		for i := 0; i < len(values); i++ {
-			temp[values[i]] = struct{}{}
+			tmp[values[i]] = struct{}{}
 		}
 	}
 
-	ret := make([]string, 0, len(temp))
-	for k := range temp {
+	ret := make([]string, 0, len(tmp))
+	for k := range tmp {
 		ret = append(ret, k)
 	}
 
@@ -364,8 +311,6 @@ func (tsdb *TSDB) QueryLabelValues(label string, start, end int64) []string {
 }
 
 func (tsdb *TSDB) Close() {
-	time.Sleep(time.Second)
-
 	tsdb.wg.Wait()
 	tsdb.cancel()
 
@@ -378,51 +323,58 @@ func (tsdb *TSDB) Close() {
 }
 
 func (tsdb *TSDB) loadFiles() {
-	files, err := ioutil.ReadDir(".")
-	if err != nil {
-		panic("BUG: failed to load data storage, error: " + err.Error())
-	}
+	err := filepath.Walk(globalOpts.dataPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("failed to read the dir: %s, err: %v", path, err)
+		}
 
-	// 确保文件按时间排序
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Name() < files[j].Name()
+		if !info.IsDir() || !strings.HasPrefix(info.Name(), "seg-") {
+			return nil
+		}
+
+		files, err := ioutil.ReadDir(info.Name())
+		if err != nil {
+			return fmt.Errorf("failed to load data storage, err: %v", err)
+		}
+
+		diskseg := &diskSegment{}
+
+		for _, file := range files {
+			fn := filepath.Join(info.Name(), file.Name())
+
+			if file.Name() == "data" {
+				mf, err := mmap.OpenMmapFile(fn)
+				if err != nil {
+					return fmt.Errorf("failed to open mmap file %s, err: %v", fn, err)
+				}
+
+				diskseg.dataFd = mf
+				diskseg.dataFilename = fn
+				diskseg.labelVs = newLabelValueSet()
+			}
+
+			if file.Name() == "meta.json" {
+				bs, err := ioutil.ReadFile(fn)
+				if err != nil {
+					return fmt.Errorf("failed to read file: %s, err: %v", fn, err)
+				}
+
+				desc := Desc{}
+				if err := json.Unmarshal(bs, &desc); err != nil {
+					return fmt.Errorf("failed to unmarshal desc file: %v", err)
+				}
+
+				diskseg.minTs = desc.MinTs
+				diskseg.maxTs = desc.MaxTs
+			}
+		}
+
+		tsdb.segs.Add(diskseg)
+		return nil
 	})
 
-	for _, file := range files {
-		if !strings.HasPrefix(file.Name(), "seg-") {
-			continue
-		}
-
-		if strings.HasSuffix(file.Name(), ".json") {
-			bs, err := ioutil.ReadFile(file.Name())
-			if err != nil {
-				logger.Errorf("failed to read file: %s, err: %v", file.Name(), err)
-				continue
-			}
-
-			desc := Desc{}
-			if err := json.Unmarshal(bs, &desc); err != nil {
-				logger.Errorf("failed to unmarshal desc file: %v", err)
-				continue
-			}
-
-			// .json / .data 应该是成对出现
-			datafname := strings.ReplaceAll(file.Name(), ".json", ".data")
-			mf, err := mmap.OpenMmapFile(datafname)
-			if err != nil {
-				logger.Errorf("failed to open mmap file %s, err: %v", datafname, err)
-				continue
-			}
-
-			diskseg := &diskSegment{
-				dataFd:       mf,
-				dataFilename: datafname,
-				minTs:        desc.MinTs,
-				maxTs:        desc.MaxTs,
-				labelVs:      newLabelValueSet(),
-			}
-			tsdb.segs.Add(diskseg)
-		}
+	if err != nil {
+		logger.Error(err)
 	}
 }
 
@@ -434,10 +386,8 @@ func OpenTSDB(opts ...Option) *TSDB {
 	tsdb := &TSDB{
 		segs: newSegmentList(),
 		q:    make(chan []*Row, defaultQSize),
-		srv:  newServer(),
 	}
 
-	tsdb.srv.ref = tsdb
 	tsdb.loadFiles()
 
 	worker := runtime.GOMAXPROCS(-1)
@@ -446,12 +396,6 @@ func OpenTSDB(opts ...Option) *TSDB {
 	for i := 0; i < worker; i++ {
 		go tsdb.ingestRows(tsdb.ctx)
 	}
-
-	go func() {
-		if err := tsdb.srv.Run(globalOpts.listenAddr); err != nil {
-			logger.Warn("server exit.")
-		}
-	}()
 
 	return tsdb
 }

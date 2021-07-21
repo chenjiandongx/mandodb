@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"encoding/binary"
@@ -54,9 +54,7 @@ func (e *encbuf) MarshalString(s string) {
 	e.B = append(e.B, s...)
 }
 
-var (
-	ErrInvalidSize = errors.New("invalid size")
-)
+var ErrInvalidSize = errors.New("invalid size")
 
 // Decode Buffer
 
@@ -100,6 +98,7 @@ func (d *decbuf) Err() error {
 	return d.err
 }
 
+// 骚操作
 func yoloString(b []byte) string {
 	return *((*string)(unsafe.Pointer(&b)))
 }

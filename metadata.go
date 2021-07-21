@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"sort"
@@ -16,6 +16,7 @@ type seriesWithLabel struct {
 	Sids []uint32
 }
 
+// Metadata 描述了 Segment 的相关元数据
 type Metadata struct {
 	MinTs  int64
 	MaxTs  int64
@@ -176,7 +177,6 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 			offset += uint32Size
 		}
 		series.Labels = labelLst
-
 		rows = append(rows, series)
 	}
 	meta.Series = rows
@@ -187,9 +187,5 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	meta.MaxTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
-	if decf.Err() != nil {
-		return decf.Err()
-	}
-
-	return nil
+	return decf.Err()
 }

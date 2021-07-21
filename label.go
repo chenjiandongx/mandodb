@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"bytes"
@@ -18,15 +18,6 @@ var labelBufPool = sync.Pool{
 	},
 }
 
-type Label struct {
-	Name  string
-	Value string
-}
-
-func (l Label) MarshalName() string {
-	return joinSeparator(l.Name, l.Value)
-}
-
 func unmarshalLabelName(s string) (string, string) {
 	pair := strings.SplitN(s, separator, 2)
 	if len(pair) != 2 {
@@ -34,6 +25,15 @@ func unmarshalLabelName(s string) (string, string) {
 	}
 
 	return pair[0], pair[1]
+}
+
+type Label struct {
+	Name  string
+	Value string
+}
+
+func (l Label) MarshalName() string {
+	return joinSeparator(l.Name, l.Value)
 }
 
 type labelValueSet struct {
@@ -75,12 +75,7 @@ func (lvs *labelValueSet) Get(label string) []string {
 	return ret
 }
 
-const (
-	labelValuesRegxPrefix = "$Regx("
-	labelValuesRegxSuffix = ")"
-)
-
-// fastRegexMatcher 是一种优化的正则匹配器 算法来自 prometheus
+// fastRegexMatcher 是一种优化的正则匹配器 算法来自 Prometheus
 type fastRegexMatcher struct {
 	re       *regexp.Regexp
 	prefix   string
@@ -109,21 +104,6 @@ func newFastRegexMatcher(v string) (*fastRegexMatcher, error) {
 	}
 
 	return m, nil
-}
-
-func (m *fastRegexMatcher) MatchString(s string) bool {
-	if m.prefix != "" && !strings.HasPrefix(s, m.prefix) {
-		return false
-	}
-
-	if m.suffix != "" && !strings.HasSuffix(s, m.suffix) {
-		return false
-	}
-
-	if m.contains != "" && !strings.Contains(s, m.contains) {
-		return false
-	}
-	return m.re.MatchString(s)
 }
 
 func optimizeConcatRegex(r *syntax.Regexp) (prefix, suffix, contains string) {
@@ -162,16 +142,31 @@ func optimizeConcatRegex(r *syntax.Regexp) (prefix, suffix, contains string) {
 	return
 }
 
-// Match 主要用于正则匹配 Labels 组合 函数标识 $Regx()
-func (lvs *labelValueSet) Match(label, value string) []string {
+func (m *fastRegexMatcher) MatchString(s string) bool {
+	if m.prefix != "" && !strings.HasPrefix(s, m.prefix) {
+		return false
+	}
+
+	if m.suffix != "" && !strings.HasSuffix(s, m.suffix) {
+		return false
+	}
+
+	if m.contains != "" && !strings.Contains(s, m.contains) {
+		return false
+	}
+	return m.re.MatchString(s)
+}
+
+// Match 主要用于匹配 Labels 组合 支持正则匹配
+func (lvs *labelValueSet) Match(matcher LabelMatcher) []string {
 	ret := make([]string, 0)
-	if strings.HasPrefix(value, labelValuesRegxPrefix) && strings.HasSuffix(value, labelValuesRegxSuffix) {
-		pattern, err := newFastRegexMatcher(value[len(labelValuesRegxPrefix) : len(value)-1])
+	if matcher.IsRegx {
+		pattern, err := newFastRegexMatcher(matcher.Value)
 		if err != nil {
-			return []string{value}
+			return []string{matcher.Value}
 		}
 
-		for _, v := range lvs.Get(label) {
+		for _, v := range lvs.Get(matcher.Name) {
 			if pattern.MatchString(v) {
 				ret = append(ret, v)
 			}
@@ -180,7 +175,7 @@ func (lvs *labelValueSet) Match(label, value string) []string {
 		return ret
 	}
 
-	return []string{value}
+	return []string{matcher.Value}
 }
 
 type LabelSet []Label
@@ -199,17 +194,6 @@ func (ls LabelSet) filter() LabelSet {
 	}
 
 	return ls[:size]
-}
-
-// Metric 返回 __name__ 指标名称
-func (ls LabelSet) Metric() string {
-	for _, l := range ls {
-		if l.Name == metricName {
-			return l.Value
-		}
-	}
-
-	return ""
 }
 
 // Map 将 Label 列表转换成 map
@@ -287,4 +271,41 @@ func (ls LabelSet) String() string {
 	}
 	b.WriteByte('}')
 	return b.String()
+}
+
+type LabelMatcher struct {
+	Name   string
+	Value  string
+	IsRegx bool
+}
+
+type LabelMatcherSet []LabelMatcher
+
+// AddMetricName 将指标名称也当成一个 label 处理 在存储的时候并不做特性的区分
+// 每个指标的最后一个 label 就是 metricName
+func (lms LabelMatcherSet) AddMetricName(metric string) LabelMatcherSet {
+	labels := lms.filter()
+
+	newl := LabelMatcher{
+		Name:  metricName,
+		Value: metric,
+	}
+	labels = append(labels, newl)
+	return labels
+}
+
+// filter 过滤空 kv 和重复数据
+func (lms LabelMatcherSet) filter() LabelMatcherSet {
+	mark := make(map[string]struct{})
+	var size int
+	for _, v := range lms {
+		_, ok := mark[v.Name]
+		if v.Name != "" && v.Value != "" && !ok {
+			lms[size] = v // 复用原来的 slice
+			size++
+		}
+		mark[v.Name] = struct{}{}
+	}
+
+	return lms[:size]
 }

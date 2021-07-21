@@ -1,9 +1,9 @@
-package storage
+package mandodb
 
 import (
 	"os"
 
-	"github.com/chenjiandongx/mandodb/lib/sortedlist"
+	"github.com/chenjiandongx/mandodb/pkg/sortedlist"
 )
 
 type SegmentType string
@@ -15,15 +15,14 @@ const (
 
 type Segment interface {
 	InsertRows(row []*Row)
-	QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error)
-	QuerySeries(labels LabelSet) ([]LabelSet, error)
+	QueryRange(lms LabelMatcherSet, start, end int64) ([]MetricRet, error)
+	QuerySeries(lms LabelMatcherSet) ([]LabelSet, error)
 	QueryLabelValues(label string) []string
 	MinTs() int64
 	MaxTs() int64
 	Frozen() bool
-	Marshal() ([]byte, []byte, error)
-	Type() SegmentType
 	Close() error
+	Type() SegmentType
 	Load() Segment
 }
 
@@ -34,16 +33,16 @@ type Desc struct {
 	MinTs           int64 `json:"minTs"`
 }
 
-type SegmentList struct {
+type segmentList struct {
 	head Segment
 	lst  sortedlist.List
 }
 
-func newSegmentList() *SegmentList {
-	return &SegmentList{head: newMemorySegment(), lst: sortedlist.NewTree()}
+func newSegmentList() *segmentList {
+	return &segmentList{head: newMemorySegment(), lst: sortedlist.NewTree()}
 }
 
-func (sl *SegmentList) Get(start, end int64) []Segment {
+func (sl *segmentList) Get(start, end int64) []Segment {
 	segs := make([]Segment, 0)
 
 	iter := sl.lst.All()
@@ -63,7 +62,7 @@ func (sl *SegmentList) Get(start, end int64) []Segment {
 	return segs
 }
 
-func (sl *SegmentList) Choose(seg Segment, start, end int64) bool {
+func (sl *segmentList) Choose(seg Segment, start, end int64) bool {
 	if seg.MinTs() < start && seg.MaxTs() > start {
 		return true
 	}
@@ -79,11 +78,11 @@ func (sl *SegmentList) Choose(seg Segment, start, end int64) bool {
 	return false
 }
 
-func (sl *SegmentList) Add(segment Segment) {
+func (sl *segmentList) Add(segment Segment) {
 	sl.lst.Add(segment.MinTs(), segment)
 }
 
-func (sl *SegmentList) Remove(segment Segment) {
+func (sl *segmentList) Remove(segment Segment) {
 	sl.lst.Remove(segment.MinTs())
 }
 

@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"strings"
@@ -108,35 +108,35 @@ func (mim *memoryIndexMap) UpdateIndex(sid string, labels LabelSet) {
 	}
 }
 
-func (mim *memoryIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []string {
+func (mim *memoryIndexMap) MatchSids(lvs *labelValueSet, lms LabelMatcherSet) []string {
 	mim.mut.Lock()
 	defer mim.mut.Unlock()
 
 	sids := newMemorySidSet()
 	var got bool
-	for i := len(labels) - 1; i >= 0; i-- {
-		temp := newMemorySidSet()
-		vs := lvs.Match(labels[i].Name, labels[i].Value)
+	for i := len(lms) - 1; i >= 0; i-- {
+		tmp := newMemorySidSet()
+		vs := lvs.Match(lms[i])
 		for _, v := range vs {
-			midx := mim.idx[joinSeparator(labels[i].Name, v)]
+			midx := mim.idx[joinSeparator(lms[i].Name, v)]
 			if midx == nil || midx.Size() <= 0 {
 				continue
 			}
 
-			temp.Union(midx.Copy())
+			tmp.Union(midx.Copy())
 		}
 
-		if temp == nil || temp.Size() <= 0 {
+		if tmp == nil || tmp.Size() <= 0 {
 			return nil
 		}
 
 		if !got {
-			sids = temp
+			sids = tmp
 			got = true
 			continue
 		}
 
-		sids.Intersection(temp.Copy())
+		sids.Intersection(tmp.Copy())
 	}
 
 	return sids.List()
@@ -194,10 +194,6 @@ func (dim *diskIndexMap) MatchLabels(lids ...uint32) []Label {
 			continue
 		}
 
-		if kv[0] == metricName {
-			continue
-		}
-
 		ret = append(ret, Label{
 			Name:  kv[0],
 			Value: kv[1],
@@ -207,25 +203,25 @@ func (dim *diskIndexMap) MatchLabels(lids ...uint32) []Label {
 	return ret
 }
 
-func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, labels LabelSet) []uint32 {
+func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, lms LabelMatcherSet) []uint32 {
 	dim.mut.Lock()
 	defer dim.mut.Unlock()
 
 	lst := make([]*roaring.Bitmap, 0)
-	for i := len(labels) - 1; i >= 0; i-- {
-		temp := make([]*roaring.Bitmap, 0)
-		vs := lvs.Match(labels[i].Name, labels[i].Value)
+	for i := len(lms) - 1; i >= 0; i-- {
+		tmp := make([]*roaring.Bitmap, 0)
+		vs := lvs.Match(lms[i])
 
 		for _, v := range vs {
-			didx := dim.label2sids[joinSeparator(labels[i].Name, v)]
+			didx := dim.label2sids[joinSeparator(lms[i].Name, v)]
 			if didx == nil || didx.set.IsEmpty() {
 				continue
 			}
 
-			temp = append(temp, didx.set)
+			tmp = append(tmp, didx.set)
 		}
 
-		union := roaring.ParOr(4, temp...)
+		union := roaring.ParOr(4, tmp...)
 		if union.IsEmpty() {
 			return nil
 		}

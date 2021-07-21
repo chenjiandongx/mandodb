@@ -152,7 +152,6 @@ func (t *tree) All() Iter {
 	return t.Range(0, math.MaxInt64)
 }
 
-// Range 实际上这里是一个伪 Iter 并不是真正意义上的迭代器 因为其内部已经把所有数据读出来了
 func (t *tree) Range(lower, upper int64) Iter {
 	it := &iter{data: []interface{}{nil}}
 	if t.root == nil {
@@ -166,6 +165,7 @@ func (t *tree) Range(lower, upper int64) Iter {
 	return it
 }
 
+// Iter 迭代器对象
 type Iter interface {
 	Next() bool
 	Value() interface{}

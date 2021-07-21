@@ -3,15 +3,15 @@ package mmap
 import (
 	"errors"
 	"os"
-
-	"golang.org/x/sys/unix"
 )
 
+// MmapFile 持有 mmap 的句柄
 type MmapFile struct {
 	f *os.File
 	b []byte
 }
 
+// OpenMmapFile 打开一个 mmap 句柄
 func OpenMmapFile(path string) (mf *MmapFile, retErr error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -39,6 +39,7 @@ func OpenMmapFile(path string) (mf *MmapFile, retErr error) {
 	return &MmapFile{f: f, b: b}, nil
 }
 
+// Close 关闭句柄
 func (f *MmapFile) Close() error {
 	err0 := syscallMunmap(f.b)
 	err1 := f.f.Close()
@@ -55,12 +56,4 @@ func (f *MmapFile) File() *os.File {
 
 func (f *MmapFile) Bytes() []byte {
 	return f.b
-}
-
-func syscallMmap(f *os.File, length int) ([]byte, error) {
-	return unix.Mmap(int(f.Fd()), 0, length, unix.PROT_READ, unix.MAP_SHARED)
-}
-
-func syscallMunmap(b []byte) (err error) {
-	return unix.Munmap(b)
 }

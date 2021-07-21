@@ -1,4 +1,4 @@
-package storage
+package mandodb
 
 import (
 	"bytes"
@@ -7,7 +7,7 @@ import (
 	"github.com/chenjiandongx/logger"
 	"github.com/dgryski/go-tsz"
 
-	"github.com/chenjiandongx/mandodb/lib/mmap"
+	"github.com/chenjiandongx/mandodb/pkg/mmap"
 )
 
 // diskSegment 持久化 segment 磁盘数据使用 mmap 的方式按需加载
@@ -99,7 +99,7 @@ func (ds *diskSegment) Load() Segment {
 		return ds
 	}
 
-	meta := Metadata{}
+	var meta Metadata
 	if err := UnmarshalMeta(metaBytes, &meta); err != nil {
 		logger.Errorf("failed to unmarshal meta: %v", err)
 		return ds
@@ -120,7 +120,7 @@ func (ds *diskSegment) Load() Segment {
 	return ds
 }
 
-func (ds *diskSegment) Marshal() ([]byte, []byte, error) {
+func (ds *diskSegment) InsertRows(_ []*Row) {
 	panic("BUG: disk segments are not mutable")
 }
 
@@ -128,12 +128,8 @@ func (ds *diskSegment) QueryLabelValues(label string) []string {
 	return ds.labelVs.Get(label)
 }
 
-func (ds *diskSegment) InsertRows(_ []*Row) {
-	panic("BUG: disk segments are not mutable")
-}
-
-func (ds *diskSegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
-	sids := ds.indexMap.MatchSids(ds.labelVs, labels)
+func (ds *diskSegment) QuerySeries(lms LabelMatcherSet) ([]LabelSet, error) {
+	sids := ds.indexMap.MatchSids(ds.labelVs, lms)
 	ret := make([]LabelSet, 0)
 
 	for _, sid := range sids {
@@ -143,8 +139,8 @@ func (ds *diskSegment) QuerySeries(labels LabelSet) ([]LabelSet, error) {
 	return ret, nil
 }
 
-func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRet, error) {
-	sids := ds.indexMap.MatchSids(ds.labelVs, labels)
+func (ds *diskSegment) QueryRange(lms LabelMatcherSet, start, end int64) ([]MetricRet, error) {
+	sids := ds.indexMap.MatchSids(ds.labelVs, lms)
 
 	ret := make([]MetricRet, 0)
 	for _, sid := range sids {
@@ -168,7 +164,7 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 			return nil, err
 		}
 
-		dps := make([]DataPoint, 0)
+		points := make([]Point, 0)
 		for iter.Next() {
 			ts, val := iter.Values()
 			if ts > uint32(end) {
@@ -176,16 +172,12 @@ func (ds *diskSegment) QueryRange(labels LabelSet, start, end int64) ([]MetricRe
 			}
 
 			if ts >= uint32(start) && ts <= uint32(end) {
-				dps = append(dps, DataPoint{Ts: int64(ts), Value: val})
+				points = append(points, Point{Ts: int64(ts), Value: val})
 			}
 		}
 
 		lbs := ds.indexMap.MatchLabels(ds.series[sid].Labels...)
-		lbs = append(lbs, Label{Name: metricName, Value: labels.Metric()})
-		ret = append(ret, MetricRet{
-			DataPoints: dps,
-			Labels:     lbs,
-		})
+		ret = append(ret, MetricRet{Points: points, Labels: lbs})
 	}
 
 	return ret, nil
