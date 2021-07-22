@@ -85,6 +85,10 @@ func (ms *memorySegment) Close() error {
 	return writeToDisk(ms)
 }
 
+func (ms *memorySegment) Cleanup() error {
+	return nil
+}
+
 func (ms *memorySegment) Load() Segment {
 	return ms
 }
@@ -171,7 +175,7 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 
 	dataBuf := make([]byte, 0)
 
-	// 占位符 用于后面标记 dataBytes / metaBytes 长度
+	// TOC 占位符 用于后面标记 dataBytes / metaBytes 长度
 	dataBuf = append(dataBuf, make([]byte, uint64Size*2)...)
 	meta := Metadata{MinTs: ms.minTs, MaxTs: ms.maxTs}
 
@@ -243,14 +247,16 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 	dataLen := len(dataBuf) - (uint64Size * 2)
 	dataBuf = append(dataBuf, metaBytes...)
 
-	dataLenBuf := newEncbuf()
-	dataLenBuf.MarshalUint64(uint64(dataLen))
-	dataLenBs := dataLenBuf.Bytes()
+	// TOC 写入
+	encf := newEncbuf()
+	encf.MarshalUint64(uint64(dataLen))
+	dataLenBs := encf.Bytes()
 	copy(dataBuf[:uint64Size], dataLenBs[:uint64Size])
 
-	metaLenBuf := newEncbuf()
-	metaLenBuf.MarshalUint64(uint64(metalen))
-	metaLenBs := metaLenBuf.Bytes()
+	encf.Reset()
+
+	encf.MarshalUint64(uint64(metalen))
+	metaLenBs := encf.Bytes()
 	copy(dataBuf[uint64Size:uint64Size*2], metaLenBs[:uint64Size])
 
 	return dataBuf, descBytes, nil

@@ -249,7 +249,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 			}
 
 			tsdb.segs.Remove(head)
-			tsdb.segs.Add(newDiskSegment(mf, path.Join(dn, "meta.json"), head.MinTs(), head.MaxTs()))
+			tsdb.segs.Add(newDiskSegment(mf, dn, head.MinTs(), head.MaxTs()))
 			logger.Infof("write file %s take: %v", fname, time.Since(t0))
 		}()
 

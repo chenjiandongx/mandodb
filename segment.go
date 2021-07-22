@@ -22,6 +22,7 @@ type Segment interface {
 	MaxTs() int64
 	Frozen() bool
 	Close() error
+	Cleanup() error
 	Type() SegmentType
 	Load() Segment
 }
@@ -82,9 +83,17 @@ func (sl *segmentList) Add(segment Segment) {
 	sl.lst.Add(segment.MinTs(), segment)
 }
 
-func (sl *segmentList) Remove(segment Segment) {
-	segment.Close()
+func (sl *segmentList) Remove(segment Segment) error {
+	if err := segment.Close(); err != nil {
+		return err
+	}
+
+	if err := segment.Cleanup(); err != nil {
+		return err
+	}
+
 	sl.lst.Remove(segment.MinTs())
+	return nil
 }
 
 const metricName = "__name__"

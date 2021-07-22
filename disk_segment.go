@@ -2,6 +2,8 @@ package mandodb
 
 import (
 	"bytes"
+	"os"
+	"path"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 type diskSegment struct {
 	dataFd       *mmap.MmapFile
 	dataFilename string
+	dir          string
 	load         bool
 
 	wg       sync.WaitGroup
@@ -29,10 +32,41 @@ type diskSegment struct {
 	dataPointsCount int64
 }
 
-func newDiskSegment(mf *mmap.MmapFile, dataFilename string, minTs, maxTs int64) Segment {
+type tocReader struct {
+	reader *bytes.Reader
+}
+
+func (t *tocReader) Read() (int64, int64, error) {
+	// 读取 dataBytes 长度
+	dst := make([]byte, uint64Size)
+	_, err := t.reader.ReadAt(dst, 0)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	decf := newDecbuf()
+	decf.UnmarshalUint64(dst)
+	dataSize := decf.UnmarshalUint64(dst)
+
+	// 读取 metaBytes 长度
+	dst = make([]byte, uint64Size)
+	_, err = t.reader.ReadAt(dst, uint64Size)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	decf = newDecbuf()
+	decf.UnmarshalUint64(dst)
+	metaSize := decf.UnmarshalUint64(dst)
+
+	return int64(dataSize), int64(metaSize), nil
+}
+
+func newDiskSegment(mf *mmap.MmapFile, dir string, minTs, maxTs int64) Segment {
 	return &diskSegment{
 		dataFd:       mf,
-		dataFilename: dataFilename,
+		dir:          dir,
+		dataFilename: path.Join(dir, "meta.json"),
 		minTs:        minTs,
 		maxTs:        maxTs,
 		labelVs:      newLabelValueSet(),
@@ -60,6 +94,10 @@ func (ds *diskSegment) Close() error {
 	return ds.dataFd.Close()
 }
 
+func (ds *diskSegment) Cleanup() error {
+	return os.RemoveAll(ds.dir)
+}
+
 func (ds *diskSegment) shift() uint64 {
 	return uint64Size * 2
 }
@@ -73,27 +111,12 @@ func (ds *diskSegment) Load() Segment {
 	t0 := time.Now()
 	reader := bytes.NewReader(ds.dataFd.Bytes())
 
-	// 读取 dataBytes 长度
-	dataSizeBs := make([]byte, uint64Size)
-	_, err := reader.ReadAt(dataSizeBs, 0)
+	tocRr := &tocReader{reader: reader}
+	dataSize, metaSize, err := tocRr.Read()
 	if err != nil {
-		logger.Errorf("failed to read %s data-size: %v", ds.dataFilename, err)
+		logger.Errorf("failed to read %s toc: %v", ds.dataFilename, err)
 		return ds
 	}
-	decf := newDecbuf()
-	decf.UnmarshalUint64(dataSizeBs)
-	dataSize := decf.UnmarshalUint64(dataSizeBs)
-
-	// 读取 metaBytes 长度
-	metaSizeBs := make([]byte, uint64Size)
-	_, err = reader.ReadAt(metaSizeBs, uint64Size)
-	if err != nil {
-		logger.Errorf("failed to read %s meta-size: %v", ds.dataFilename, err)
-		return ds
-	}
-	decf = newDecbuf()
-	decf.UnmarshalUint64(metaSizeBs)
-	metaSize := decf.UnmarshalUint64(metaSizeBs)
 
 	metaBytes := make([]byte, metaSize)
 	_, err = reader.ReadAt(metaBytes, uint64Size*2+int64(dataSize))
