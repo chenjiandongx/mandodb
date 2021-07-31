@@ -12,6 +12,12 @@ series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 
 [Prometheus](https://prometheus.io/), [InfluxDB](https://www.influxdata.com/), [M3](https://m3db.io/), [TimescaleDB](https://www.timescale.com/) 都是时下流行的 TSDB。时序数据的压缩算法很大程度上决定了 TSDB 的性能，以上几个项目的实现都参考了 Fackbook 2015 年发表的论文[《Gorilla: A fast, scalable, in-memory time series database》](http://www.vldb.org/pvldb/vol8/p1816-teller.pdf) 中提到的差值算法，该算法平均可以将 16 字节的数据点压缩成 1.37 字节。
 
+**Who's mando?**
+
+> Din Djarin, also known as "the Mandalorian" or simply "Mando," was a human male Mandalorian who worked as a famous bounty hunter during the New Republic Era.
+
+<p align="center"><image src="./images/mando.png" width="620px"></p>
+
 **What's mandodb?**
 
 [mandodb](https://github.com/chenjiandongx/mandodb) 是在我在学习的过程中实现的一个最小化的 TSDB，可能从概念上来讲它甚至还算不上是一个 TSDB，因为它：
@@ -485,6 +491,8 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 }
 ```
 
+写入的时候支持数据时间回拨，也就是支持**有限的**乱序数据写入，实现方案是在内存中对还没归档的每条时间线维护一个链表（同样使用 AVL Tree 实现），当数据点的时间戳不是递增的时候存储到链表中，查询的时候会将两部分数据合并查询，持久化的时候也会将两者合并写入。
+
 ## 🖇 mmap 内存映射
 
 > [mmap](https://www.cnblogs.com/fnlingnzb-learner/p/6955591.html) 是一种将磁盘文件映射到进程的虚拟地址空间来实现对文件读取和修改操作的技术。
@@ -493,7 +501,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 
 <p align="center"><image src="./images/我不理解.png" width="320px"></p>
 
-关于虚拟内存细节可以阅读 [虚拟内存精粹](https://strikefreedom.top/memory-management--virtual-memory) 这篇文章。
+虚拟内存细节可以阅读 [《虚拟内存精粹》](https://strikefreedom.top/memory-management--virtual-memory) 这篇文章。
 
 ***Figure: 常规文件操作和 mmap 操作的区别***
 
