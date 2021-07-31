@@ -20,7 +20,7 @@ series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 
 **What's mandodb?**
 
-[mandodb](https://github.com/chenjiandongx/mandodb) 是在我在学习的过程中实现的一个最小化的 TSDB，可能从概念上来讲它甚至还算不上是一个 TSDB，因为它：
+[mandodb](https://github.com/chenjiandongx/mandodb) 是我在学习的过程中实现的一个最小化的 TSDB，从概念上来讲它甚至还算不上是一个 TSDB，因为它：
 
 * 没有实现自己的查询引擎（实现难度大）
 * 缺少磁盘归档文件 Compact 操作（有空的话会实现）
@@ -438,7 +438,7 @@ series
     <-------------------- time --------------------->
 ```
 
-我们将多条时间线的数据按一定的时间跨度切割成多个小块，每个小块本质就是一个独立小型的数据库。内存中保留最近两个小时的热数据（Memory Segment），其余数据持久化到磁盘(Disk Segment)。
+我们将多条时间线的数据按一定的时间跨度切割成多个小块，每个小块本质就是一个独立小型的数据库，这种做法另外一个优势是清除过期操作的时候非常方便，只要将整个块给删了就行 👻。内存中保留最近两个小时的热数据（Memory Segment），其余数据持久化到磁盘(Disk Segment)。
 
 ***Figure: 序列分块***
 
@@ -586,7 +586,9 @@ sid2; sid3; sid5
 
 假设我们的查询只支持**相等匹配**的话，格局明显就小了 🤌。查询条件是 `{vm=~"node*", iface="eth0"}` 肿么办？对 label1、label2、label3 和 label4 一起求一个并集吗？显然不是，因为这样算的话那结果就是 `sid3`。
 
-厘清关系就不难看出，**只要对相同的 LabelName 做并集然后再对不同的 LabelName 做交集就可以了**。这样算的正确结果就是 `sid3` 和 `sid5`。然而，确定相同的 LabelName 也是一个问题，因为 Label 本身就代表着 `Name:Value`，难不成我还要遍历所有 label 才能确定嘛，这不就又成了全表扫描？？？
+厘清关系就不难看出，**只要对相同的 LabelName 做并集然后再对不同的 LabelName 做交集就可以了**。这样算的正确结果就是 `sid3` 和 `sid5`。实现的时候用到了 Roaring Bitmap，一种优化的位图算法。
+
+然而，确定相同的 LabelName 也是一个问题，因为 Label 本身就代表着 `Name:Value`，难不成我还要遍历所有 label 才能确定嘛，这不就又成了全表扫描？？？
 
 <div align="center"><image src="./images/我不答应.png" width="320px"></div>
 
