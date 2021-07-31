@@ -151,7 +151,7 @@ func main() {
 	)
 	defer store.Close()
 
-    // 插入数据
+	// 插入数据
 	_ = store.InsertRows([]*mandodb.Row{
 		{
 			Metric: "cpu.busy",
@@ -173,32 +173,32 @@ func main() {
 
 	time.Sleep(time.Millisecond)
 
-    // 时序数据查询
+	// 时序数据查询
 	data, _ := store.QueryRange("cpu.busy", nil, 1600000000, 1600000002)
 	fmt.Printf("data: %+v\n", data)
-    // output:
-    // data: [{Labels:{__name__="cpu.busy", dc="gz-idc", node="vm1"} Points:[{Ts:1600000001 Value:0.1}]}]
+	// output:
+	// data: [{Labels:{__name__="cpu.busy", dc="gz-idc", node="vm1"} Points:[{Ts:1600000001 Value:0.1}]}]
 
-    // 查询 Series
-    // __name__ 是 metric 名称在 TSDB 中的 Label Key
+	// 查询 Series
+	// __name__ 是 metric 名称在 TSDB 中的 Label Key
 	ser, _ := store.QuerySeries(
         mandodb.LabelMatcherSet{{Name: "__name__", Value: "cpu.busy"}}, 1600000000, 1600000002)
 	for _, d := range ser {
 		fmt.Printf("data: %+v\n", d)
 	}
-    // output:
-    // data: map[__name__:cpu.busy dc:gz-idc node:vm1]
-    // data: map[__name__:cpu.busy dc:sz-idc node:vm2]
+	// output:
+	// data: map[__name__:cpu.busy dc:gz-idc node:vm1]
+	// data: map[__name__:cpu.busy dc:sz-idc node:vm2]
 
-    // 查询标签值
+	// 查询标签值
     lvs := store.QueryLabelValues("node", 1600000000, 1600000002)
 	fmt.Printf("data: %+v\n", lvs)
-    // output:
-    // data: [vm1 vm2]
+	// output:
+	// data: [vm1 vm2]
 }
 ```
 
-这次我想把这段时间学习的内容整理一下，尝试完整介绍如何从零开始实现一个小型的 TSDB。
+这次我把这段时间学习的内容整理一下，尝试完整介绍如何从零开始实现一个小型的 TSDB。
 
 <p align="center"><image src="./images/教我做事.png" width="320px"></p>
 
@@ -252,20 +252,20 @@ func New(t0 uint32) *Series {
 
 // Push 负责写入时序数据
 func (s *Series) Push(t uint32, v float64) {
-    // ....
-    // 如果是第一个数据点的话写入原始数据后直接返回
+	// ....
+	// 如果是第一个数据点的话写入原始数据后直接返回
 	if s.t == 0 {
 		s.t = t
 		s.val = v
 		s.tDelta = t - s.T0 // 实际上这里为 0
 
-        // The block header stores the starting time stamp, t-1（前一个时间戳）,
-        // which is aligned to a two hour window; the first time
-        // stamp, t0, in the block is stored as a delta from t−1 in 14 bits.
+		// The block header stores the starting time stamp, t-1（前一个时间戳）,
+		// which is aligned to a two hour window; the first time
+		// stamp, t0, in the block is stored as a delta from t−1 in 14 bits.
         
-        // 用 14 个 bit 写入时间戳差值
+		// 用 14 个 bit 写入时间戳差值
 		s.bw.writeBits(uint64(s.tDelta), 14)
-        // 原始数据点完整写入
+		// 原始数据点完整写入
 		s.bw.writeBits(math.Float64bits(v), 64)
 		return
 	}
@@ -273,50 +273,50 @@ func (s *Series) Push(t uint32, v float64) {
 	tDelta := t - s.t
 	dod := int32(tDelta - s.tDelta) // 计算差值的差值 Detla of Delta
 
-    // 下面开始就处理非第一个数据点的情况了
+		// 下面开始就处理非第一个数据点的情况了
 	switch {
-        // If D is zero, then store a single ‘0’ bit
-        // 如果是零的话 那直接用 '0' 一个字节就可以直接表示
+		// If D is zero, then store a single ‘0’ bit
+		// 如果是零的话 那直接用 '0' 一个字节就可以直接表示
 	case dod == 0:
 		s.bw.writeBit(zero)
 
-        //  If D is between [-63, 64], store ‘10’ followed by the value (7 bits)
+		//  If D is between [-63, 64], store ‘10’ followed by the value (7 bits)
 	case -63 <= dod && dod <= 64:
 		s.bw.writeBits(0x02, 2) // 控制位 '10'
 		s.bw.writeBits(uint64(dod), 7) // 7bits 可以表示 [-63, 64] 的范围
 
-        // If D is between [-255, 256], store ‘110’ followed by the value (9 bits)
+		// If D is between [-255, 256], store ‘110’ followed by the value (9 bits)
 	case -255 <= dod && dod <= 256:
 		s.bw.writeBits(0x06, 3) // 控制位 '110'
 		s.bw.writeBits(uint64(dod), 9)
 
-        // if D is between [-2047, 2048], store ‘1110’ followed by the value (12 bits)
+		// if D is between [-2047, 2048], store ‘1110’ followed by the value (12 bits)
 	case -2047 <= dod && dod <= 2048:
 		s.bw.writeBits(0x0e, 4) // 控制位 '1110'
 		s.bw.writeBits(uint64(dod), 12)
 
-        // Otherwise store ‘1111’ followed by D using 32 bits
+		// Otherwise store ‘1111’ followed by D using 32 bits
 	default:
 		s.bw.writeBits(0x0f, 4) // 其余情况控制位均用 '1111'
 		s.bw.writeBits(uint64(dod), 32)
 	}
 
-    // 到这里 (T, V) 中的时间戳已经写入完毕了 接下来是写 V 部分
+	// 到这里 (T, V) 中的时间戳已经写入完毕了 接下来是写 V 部分
 
-    // 先计算两个值的异或结果
+	// 先计算两个值的异或结果
 	vDelta := math.Float64bits(v) ^ math.Float64bits(s.val)
 
-    // If XOR with the previous is zero (same value), store single ‘0’ bit
-    // 如果前后两个值相等的话 直接用 '0' 1 个 bit 就可以表示
-    // 所以如果上报的时序数据是 1 或者 0 这种的话 占用的内存会非常少
+	// If XOR with the previous is zero (same value), store single ‘0’ bit
+	// 如果前后两个值相等的话 直接用 '0' 1 个 bit 就可以表示
+	// 所以如果上报的时序数据是 1 或者 0 这种的话 占用的内存会非常少
 
-    // zero = '0'; one = '1'
+	// zero = '0'; one = '1'
 	if vDelta == 0 {
 		s.bw.writeBit(zero)
 	} else {    // 非 0 情况那就要把控制位置为 1
 		s.bw.writeBit(one)
 
-        // 计算前置 0 和后置 0
+		// 计算前置 0 和后置 0
 		leading := uint8(bits.LeadingZeros64(vDelta))
 		trailing := uint8(bits.TrailingZeros64(vDelta))
 
@@ -325,38 +325,38 @@ func (s *Series) Push(t uint32, v float64) {
 			leading = 31
 		}
 
-        // (Control bit ‘0’) If the block of meaningful bits
-        // falls within the block of previous meaningful bits,
-        // i.e., there are at least as many leading zeros and
-        // as many trailing zeros as with the previous value,
-        // use that information for the block position and
-        // just store the meaningful XORed value.
+		// (Control bit ‘0’) If the block of meaningful bits
+		// falls within the block of previous meaningful bits,
+		// i.e., there are at least as many leading zeros and
+		// as many trailing zeros as with the previous value,
+		// use that information for the block position and
+		// just store the meaningful XORed value.
 
-        // 如果前置 0 不小于上一个值计算的异或结果的前置 0 且后置 0 也不小于上一个值计算的异或结果的后置 0
+		// 如果前置 0 不小于上一个值计算的异或结果的前置 0 且后置 0 也不小于上一个值计算的异或结果的后置 0
 		if s.leading != ^uint8(0) && leading >= s.leading && trailing >= s.trailing { // => 控制位 '10'
 			s.bw.writeBit(zero)
-            // 记录异或值非零部分
+			// 记录异或值非零部分
 			s.bw.writeBits(vDelta>>s.trailing, 64-int(s.leading)-int(s.trailing))
 		} else { // => 控制位 '11'
 
-            // (Control bit ‘1’) Store the length of the number
-            // of leading zeros in the next 5 bits, then store the
-            // length of the meaningful XORed value in the next
-            // 6 bits. Finally store the meaningful bits of the XORed value.
+			// (Control bit ‘1’) Store the length of the number
+			// of leading zeros in the next 5 bits, then store the
+			// length of the meaningful XORed value in the next
+			// 6 bits. Finally store the meaningful bits of the XORed value.
 			s.leading, s.trailing = leading, trailing
 
-            // 其他情况控制位置为 1 并用接下来的 5bits 记录前置 0 个数
+			// 其他情况控制位置为 1 并用接下来的 5bits 记录前置 0 个数
 			s.bw.writeBit(one)
 			s.bw.writeBits(uint64(leading), 5)
 
-            // 然后用接下来的 6bits 记录异或差值中的非零部分
+			// 然后用接下来的 6bits 记录异或差值中的非零部分
 			sigbits := 64 - leading - trailing
 			s.bw.writeBits(uint64(sigbits), 6)
 			s.bw.writeBits(vDelta>>trailing, int(sigbits))
 		}
 	}
 
-    // 状态更新 至此（T, V）均已被压缩写入到内存中
+	// 状态更新 至此（T, V）均已被压缩写入到内存中
 	s.tDelta = tDelta
 	s.t = t
 	s.val = v
@@ -383,7 +383,7 @@ func finish(w *bstream) {
 
 Timestamp buckets 中，前后两个时间戳差值相同的比例高达 96.39%，而在 Value buckets 中只用一个控制位的占比也达到了 59.06%，可见其压缩比之高。
 
-论文中还给出了一个重要结论，**时序数据压缩比随着时间的增长而增长，并在 120 个点的时候开始收敛到一个最佳比例。**
+论文还给出了一个重要结论，**数据压缩比随着时间的增长而增长，并在 120 个点的时候开始收敛到一个最佳值。**
 
 ***Figure: 压缩率曲线***
 
@@ -410,9 +410,9 @@ series
     <-------------------- time --------------------->
 ```
 
-时序数据有很强的时间特性（这不是废话吗 🧐），即大多数查询其实只会查询**最近时刻**的数据，这里的「最近」是个相对概念。所以好像也没必要维护一条时间线的完整生命周期，特别是在 Kubernetes 这种云原生场景，Pod 随时有可能会被扩缩容，也就意味着一条时间线的声明周期可能会很短。如果我们一直记录着所有的时间线，那么随着时间的推移，数据库里的时间线的数量会呈现一个线性增长的趋势 😱，会极大地影响查询效率。
+时序数据有很强的时间特性（这不是废话吗 🧐），即大多数查询其实只会查询**最近时刻**的数据，这里的「最近」是个相对概念。所以没必要维护一条时间线的完整生命周期，特别是在 Kubernetes 这种云原生场景，Pod 随时有可能会被扩缩容，也就意味着一条时间线的生命周期可能会很短。如果我们一直记录着所有的时间线，那么随着时间的推移，数据库里的时间线的数量会呈现一个线性增长的趋势 😱，会极大地影响查询效率。
 
-在 Gorilla 论文中也提出了一个方案「序列分流」，这个概念描述的是一组时间序列变得不活跃，即不再接收数据点，取而代之的是有一组新的活跃的序列出现的场景。
+在 Gorilla 论文中也提出了一个概念「序列分流」，这个概念描述的是一组时间序列变得不活跃，即不再接收数据点，取而代之的是有一组新的活跃的序列出现的场景。
 
 ```golang
 series
@@ -438,7 +438,7 @@ series
 
 <p align="center"><image src="./images/分块.png" width="620px"></p>
 
-DiskSegment 使用的是 `AVL Tree` 实现的列表，插入时排序。为什么不用更加高大上的红黑树？因为不好实现...
+DiskSegment 使用的是 `AVL Tree` 实现的列表，可在插入时排序。为什么不用更加高大上的红黑树？因为不好实现...
 
 <p align="center"><image src="./images/又不是不能用.png" width="320px"></p>
 
@@ -513,7 +513,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 2. 执行内核空间的系统调用函数 mmap，建立文件物理地址和进程虚拟地址的一一映射关系。
 3. 进程发起对这片映射空间的访问，引发缺页异常，实现文件内容到物理内存的拷贝。
 
-**小结**
+**📣 小结**
 
 常规文件操作为了提高读写效率和保护磁盘，使用了页缓存机制。这样造成读文件时需要先将文件页从磁盘拷贝到页缓存中，由于页缓存处在内核空间，不能被用户进程直接寻址，所以还需要将页缓存中数据页再次拷贝到内存对应的用户空间中。这样，通过了两次数据拷贝过程，才能完成进程对文件内容的获取任务。写操作也是一样，待写入的 buffer 在内核空间不能直接访问，必须要先拷贝至内核空间对应的主存，再写回磁盘中（延迟写回），也是需要两次数据拷贝。
 
@@ -521,7 +521,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 
 <p align="center"><image src="./images/理解成功.png" width="320px"></p>
 
-总而言之，常规文件操作需要从磁盘到页缓存再到用户主存的两次数据拷贝。而 mmap 操控文件，只需要从磁盘到用户主存的一次数据拷贝过程。mmap 的关键点是实现了「用户空间」和「内核空间」的数据直接交互而省去了不同空间数据复制的开销。
+😅 总而言之，常规文件操作需要从磁盘到页缓存再到用户主存的两次数据拷贝。而 mmap 操控文件，只需要从磁盘到用户主存的一次数据拷贝过程。mmap 的关键点是实现了「用户空间」和「内核空间」的数据直接交互而省去了不同空间数据复制的开销。
 
 ## 📍 索引设计
 
@@ -539,7 +539,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 | sid3 | × | × |  | × | ... | × |  
 | sid4 | × |  | × | × | ... | × |
 
-时序数据是 `NoSchema` 的，没办法提前建表和定义数据模型 🤔，因为我们要允许用户上报**任意 Label 组合**的数据，这样的话就没办法进行动态的扩展了。或许你会灵光一现 ✨，既然这样，那把 Labels 放一个字段拼接起来不就可以无限扩展啦，比如下面这个样子。
+时序数据是 `NoSchema` 的，没办法提前建表和定义数据模型 🤔，因为我们要支持用户上报**任意 Label 组合**的数据，这样的话就没办法进行动态的扩展了。或许你会灵光一现 ✨，既然这样，那把 Labels 放一个字段拼接起来不就可以无限扩展啦，比如下面这个样子。
 
 | Sid（主键） | Labels |
 | ----- | ---- |
@@ -693,9 +693,8 @@ func (m *fastRegexMatcher) MatchString(s string) bool {
 
 ## 🗂 存储布局
 
-既然是数据库，那么自然少不了数据持久化的特性。了解完索引的设计，再看看落到磁盘的存储布局就很清晰了。首先跑个示例程序写入一些数据。
+既然是数据库，那么自然少不了数据持久化的特性。了解完索引的设计，再看看落到磁盘的存储布局就很清晰了。先跑个示例程序写入一些数据热热身。
 ```golang
-// main.go
 package main
 
 import (
@@ -768,7 +767,7 @@ func main() {
 }
 ```
 
-每个分块的保存在 `seg-${mints}-${maxts}` 的文件夹里，每个文件夹含有 `data` 和 `meta.json` 两个文件。
+每个分块保存在名字为 `seg-${mints}-${maxts}` 文件夹里，每个文件夹含有 `data` 和 `meta.json` 两个文件。
 
 * **data**: 存储了一个 Segment 的所有数据，包括数据点和索引信息。
 * **meta.json**: 描述了分块的时间线数量，数据点数量以及该块的数据时间跨度。
@@ -850,6 +849,12 @@ TOC 描述了 Data Block 和 Meta Block（Series Block + Labels Block）的大�
 
 <p align="center"><image src="./images/data-block.png" width="380px"></p>
 
+Labels Block 记录了具体的 Label 值以及对应 Label 与哪些 Series 相关联。
+
+***Figure: Labels Block***
+
+<p align="center"><image src="./images/label-block.png" width="620px"></p>
+
 Series Block 记录了每条时间线的元数据，字段解释如下。
 
 * **SidLength**: Sid 的长度。
@@ -863,13 +868,7 @@ Series Block 记录了每条时间线的元数据，字段解释如下。
 
 <p align="center"><image src="./images/series-block.png" width="620px"></p>
 
-Labels Block 记录了具体的 Label 值以及对应 Label 与哪些 Series 相关联。
-
-***Figure: Labels Block***
-
-<p align="center"><image src="./images/label-block.png" width="620px"></p>
-
-看完设计，再看看具体代码实现。
+了解完设计，再看看具体代码实现。
 
 **编码 Metadata**
 
@@ -1006,9 +1005,9 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 }
 ```
 
-结合上面的 Series Block 和 Labels Block 两张图，是不是就恍然大明白了。
+结合上面的 Series Block 和 Labels Block 的结构图，是不是就恍然大明白了。
 
-<p align="center"><image src="./images/想开了.png" width="320px"></p>
+<p align="center"><image src="./images/深度理解.png" width="320px"></p>
 
 至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
 
