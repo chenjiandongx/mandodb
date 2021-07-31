@@ -191,7 +191,7 @@ func main() {
 	// data: map[__name__:cpu.busy dc:sz-idc node:vm2]
 
 	// 查询标签值
-    lvs := store.QueryLabelValues("node", 1600000000, 1600000002)
+	lvs := store.QueryLabelValues("node", 1600000000, 1600000002)
 	fmt.Printf("data: %+v\n", lvs)
 	// output:
 	// data: [vm1 vm2]
@@ -273,7 +273,7 @@ func (s *Series) Push(t uint32, v float64) {
 	tDelta := t - s.t
 	dod := int32(tDelta - s.tDelta) // 计算差值的差值 Detla of Delta
 
-		// 下面开始就处理非第一个数据点的情况了
+	// 下面开始就处理非第一个数据点的情况了
 	switch {
 		// If D is zero, then store a single ‘0’ bit
 		// 如果是零的话 那直接用 '0' 一个字节就可以直接表示
@@ -868,7 +868,7 @@ Series Block 记录了每条时间线的元数据，字段解释如下。
 
 <p align="center"><image src="./images/series-block.png" width="620px"></p>
 
-了解完设计，再看看具体代码实现。
+了解完设计，再看看代码实现。
 
 **编码 Metadata**
 
@@ -1005,13 +1005,13 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 }
 ```
 
-结合上面的 Series Block 和 Labels Block 的结构图，是不是就恍然大明白了。
+至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
 
 <p align="center"><image src="./images/深度理解.png" width="320px"></p>
-
-至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
 
 ## 📋 代码测试
 
 
 ## 📑 License
+
+MIT [©chenjiandongx](https://github.com/chenjiandongx)
