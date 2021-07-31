@@ -93,7 +93,7 @@ func WithEnabledOutdated(outdated bool) Option {
 }
 
 // WithMaxRowsPerSegment 设置单 Segment 最大允许存储的点数
-// 默认为 19960412
+// 默认为 19960412（夹杂私货 🐶）
 func WithMaxRowsPerSegment(n int64) Option {
 	return func(c *tsdbOptions) {
 		c.maxRowsPerSegment = n

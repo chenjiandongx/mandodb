@@ -27,6 +27,7 @@ func unmarshalLabelName(s string) (string, string) {
 	return pair[0], pair[1]
 }
 
+// Label 代表一个标签组合
 type Label struct {
 	Name  string
 	Value string
@@ -89,7 +90,6 @@ func newFastRegexMatcher(v string) (*fastRegexMatcher, error) {
 		return nil, err
 	}
 
-	// 语法解析
 	parsed, err := syntax.Parse(v, syntax.Perl)
 	if err != nil {
 		return nil, err
@@ -106,15 +106,16 @@ func newFastRegexMatcher(v string) (*fastRegexMatcher, error) {
 	return m, nil
 }
 
+// optimizeConcatRegex returns literal prefix/suffix text that can be safely
+// checked against the label value before running the regexp matcher.
 func optimizeConcatRegex(r *syntax.Regexp) (prefix, suffix, contains string) {
 	sub := r.Sub
 
-	// 移除前缀空格
+	// We can safely remove begin and end text matchers respectively
+	// at the beginning and end of the regexp.
 	if len(sub) > 0 && sub[0].Op == syntax.OpBeginText {
 		sub = sub[1:]
 	}
-
-	// 移除后缀空格
 	if len(sub) > 0 && sub[len(sub)-1].Op == syntax.OpEndText {
 		sub = sub[:len(sub)-1]
 	}
@@ -123,17 +124,21 @@ func optimizeConcatRegex(r *syntax.Regexp) (prefix, suffix, contains string) {
 		return
 	}
 
-	// 如果前缀和后缀是正常字符的话可以直接标记下来
-	if sub[0].Op == syntax.OpLiteral {
+	// Given Prometheus regex matchers are always anchored to the begin/end
+	// of the text, if the first/last operations are literals, we can safely
+	// treat them as prefix/suffix.
+	if sub[0].Op == syntax.OpLiteral && (sub[0].Flags&syntax.FoldCase) == 0 {
 		prefix = string(sub[0].Rune)
 	}
-	if last := len(sub) - 1; sub[last].Op == syntax.OpLiteral {
+	if last := len(sub) - 1; sub[last].Op == syntax.OpLiteral && (sub[last].Flags&syntax.FoldCase) == 0 {
 		suffix = string(sub[last].Rune)
 	}
 
-	// 这里已经去除首尾了 匹配中间的字符串
+	// If contains any literal which is not a prefix/suffix, we keep the
+	// 1st one. We do not keep the whole list of literals to simplify the
+	// fast path.
 	for i := 1; i < len(sub)-1; i++ {
-		if sub[i].Op == syntax.OpLiteral {
+		if sub[i].Op == syntax.OpLiteral && (sub[i].Flags&syntax.FoldCase) == 0 {
 			contains = string(sub[i].Rune)
 			break
 		}
@@ -178,6 +183,7 @@ func (lvs *labelValueSet) Match(matcher LabelMatcher) []string {
 	return []string{matcher.Value}
 }
 
+// LabelSet 表示 Label 组合
 type LabelSet []Label
 
 // filter 过滤空 kv 和重复数据
@@ -273,12 +279,14 @@ func (ls LabelSet) String() string {
 	return b.String()
 }
 
+// LabelMatcher Label 匹配器 支持正则
 type LabelMatcher struct {
 	Name   string
 	Value  string
 	IsRegx bool
 }
 
+// LabelMatcherSet 表示 LabelMatcher 组合
 type LabelMatcherSet []LabelMatcher
 
 // AddMetricName 将指标名称也当成一个 label 处理 在存储的时候并不做特性的区分

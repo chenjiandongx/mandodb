@@ -17,11 +17,10 @@ type memorySegment struct {
 	once     sync.Once
 	segment  sync.Map
 	indexMap *memoryIndexMap
+	labelVs  *labelValueSet
 
 	outdated    map[string]sortedlist.List
 	outdatedMut sync.Mutex
-
-	labelVs *labelValueSet
 
 	minTs int64
 	maxTs int64
@@ -67,10 +66,6 @@ func (ms *memorySegment) Frozen() bool {
 	}
 
 	return ms.MaxTs()-ms.MinTs() > int64(globalOpts.segmentDuration.Seconds())
-}
-
-func (ms *memorySegment) QueryLabelValues(label string) []string {
-	return ms.labelVs.Get(label)
 }
 
 func (ms *memorySegment) Type() SegmentType {
@@ -124,6 +119,10 @@ func (ms *memorySegment) InsertRows(rows []*Row) {
 		atomic.AddInt64(&ms.dataPointsCount, 1)
 		ms.indexMap.UpdateIndex(row.ID(), row.Labels)
 	}
+}
+
+func (ms *memorySegment) QueryLabelValues(label string) []string {
+	return ms.labelVs.Get(label)
 }
 
 func (ms *memorySegment) QuerySeries(lms LabelMatcherSet) ([]LabelSet, error) {

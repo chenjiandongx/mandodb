@@ -56,7 +56,7 @@ func newZstdBytesCompressor() BytesCompressor {
 }
 
 func (c *zstdBytesCompressor) Compress(src []byte) []byte {
-	var encoder, _ = zstd.NewWriter(nil)
+	var encoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 	return encoder.EncodeAll(src, make([]byte, 0, len(src)))
 }
 

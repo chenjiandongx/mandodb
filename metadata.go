@@ -48,11 +48,10 @@ func UnmarshalMeta(data []byte, meta *Metadata) error {
 }
 
 const (
-	endOfBlock uint8 = 0xff
-	uint8Size        = 1
-	uint16Size       = 2
-	uint32Size       = 4
-	uint64Size       = 8
+	endOfBlock uint16 = 0xffff
+	uint16Size        = 2
+	uint32Size        = 4
+	uint64Size        = 8
 
 	magic = "https://github.com/chenjiandongx/mandodb"
 )
@@ -70,16 +69,16 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	labelOrdered := make(map[string]int)
 	for idx, row := range meta.Labels {
 		labelOrdered[row.Name] = idx
-		encf.MarshalUint8(uint8(len(row.Name)))
+		encf.MarshalUint16(uint16(len(row.Name)))
 		encf.MarshalString(row.Name)
 		encf.MarshalUint32(uint32(len(row.Sids)))
 		encf.MarshalUint32(row.Sids...)
 	}
-	encf.MarshalUint8(endOfBlock)
+	encf.MarshalUint16(endOfBlock)
 
 	// series block
 	for idx, series := range meta.Series {
-		encf.MarshalUint8(uint8(len(series.Sid)))
+		encf.MarshalUint16(uint16(len(series.Sid)))
 		encf.MarshalString(series.Sid)
 		encf.MarshalUint64(series.StartOffset, series.EndOffset)
 
@@ -96,7 +95,7 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 		})
 		encf.MarshalUint32(lids...)
 	}
-	encf.MarshalUint8(endOfBlock)
+	encf.MarshalUint16(endOfBlock)
 
 	encf.MarshalUint64(uint64(meta.MinTs))
 	encf.MarshalUint64(uint64(meta.MaxTs))
@@ -126,8 +125,8 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	for {
 		var labelName string
 
-		labelLen := data[offset]
-		offset += uint8Size
+		labelLen := decf.UnmarshalUint16(data[offset : offset+uint16Size])
+		offset += uint16Size
 
 		if labelLen == endOfBlock {
 			break
@@ -152,8 +151,8 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	for {
 		series := metaSeries{}
 
-		sidLen := data[offset]
-		offset += uint8Size
+		sidLen := decf.UnmarshalUint16(data[offset : offset+uint16Size])
+		offset += uint16Size
 
 		if sidLen == endOfBlock {
 			break
