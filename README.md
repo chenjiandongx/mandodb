@@ -26,7 +26,7 @@ series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 * 缺少磁盘归档文件 Compact 操作（有空的话会实现）
 * 没有 WAL 作为灾备保证高可用（心情好的话会实现）
 
-mandodb 主要受到了两个项目的启发。
+mandodb 主要受到了两个项目的启发，本项目仅限于学习用途，未经生产环境测试验证。
 
 * [nakabonne/tstorage](https://github.com/nakabonne/tstorage)
 * [prometheus/prometheus](https://github.com/prometheus/prometheus)
@@ -136,6 +136,10 @@ WithRetention(t time.Duration) Option
 // WithWriteTimeout 设置写入超时阈值
 // 默认为 30s
 WithWriteTimeout(t time.Duration) Option
+
+// WithLoggerConfig 设置日志配置项
+// logger: github.com/chenjiandongx/logger
+func WithLoggerConfig(opt *logger.Options) Option
 ```
 
 ## 🔖 用法示例
@@ -1127,6 +1131,10 @@ A: Not sure
 **Q: Is mando awesome?**
 
 A: Definitely YES!
+
+**Q: PRs or Issues?**
+
+A: are welcome 😉...
 
 **Q: What's the hardest part of this project？**
 

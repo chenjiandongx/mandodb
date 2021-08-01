@@ -31,6 +31,7 @@ type tsdbOptions struct {
 	enableOutdated    bool
 	maxRowsPerSegment int64
 	dataPath          string
+	loggerConfig      *logger.Options
 }
 
 var globalOpts = &tsdbOptions{
@@ -43,6 +44,7 @@ var globalOpts = &tsdbOptions{
 	enableOutdated:    true,
 	maxRowsPerSegment: 19960412,
 	dataPath:          ".",
+	loggerConfig:      nil,
 }
 
 type Option func(c *tsdbOptions)
@@ -121,6 +123,16 @@ func WithRetention(t time.Duration) Option {
 func WithWriteTimeout(t time.Duration) Option {
 	return func(c *tsdbOptions) {
 		c.writeTimeout = t
+	}
+}
+
+// WithLoggerConfig 设置日志配置项
+func WithLoggerConfig(opt *logger.Options) Option {
+	return func(c *tsdbOptions) {
+		if opt != nil {
+			c.loggerConfig = opt
+			logger.SetOptions(*opt)
+		}
 	}
 }
 

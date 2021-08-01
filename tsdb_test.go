@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chenjiandongx/logger"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,7 +37,11 @@ func genPoints(ts int64, node, dc int) []*Row {
 func TestTSDB_QueryRange(t *testing.T) {
 	tmpdir := "/tmp/tsdb"
 
-	store := OpenTSDB(WithDataPath(tmpdir))
+	store := OpenTSDB(WithDataPath(tmpdir), WithLoggerConfig(&logger.Options{
+		Stdout:      true,
+		ConsoleMode: true,
+		Level:       logger.ErrorLevel,
+	}))
 	defer store.Close()
 	defer os.RemoveAll(tmpdir)
 
