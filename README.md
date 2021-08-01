@@ -933,11 +933,11 @@ Permissions Size User          Date Modified Name
 .rwxr-xr-x   110 chenjiandongx  1 Aug 14:39  meta.json
 ```
 
-多多少少还是有点效果的 🐶...
+多多少少还是有点效果的 🤪...
 
 <p align="center"><image src="./images/就这.png" width="320px"></p>
 
-压缩是有成本的，压缩体积的同时会增大 CPU 开销（mbp 可以煎鸡蛋了），减缓写入速率。且这里做了个权衡，ZSTD 的 Level 设置为 `zstd.SpeedFastest`，速度优先。
+压缩是有成本的，压缩体积的同时会增大 CPU 开销（mbp 可以煎鸡蛋了），减缓写入速率。
 
 **敲黑板，接下来就要来好好讲讲 `data` 文件到底写了什么东西。** `data` 存储布局如下。
 
@@ -1129,6 +1129,10 @@ A: 🤭 Not sure.
 **Q: Is mando awesome?**
 
 A: 😎 Definitely YES!
+
+**Q: Write performance?**
+
+A: 🥺 ~40w/s
 
 **Q: PRs or Issues?**
 
