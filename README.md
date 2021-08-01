@@ -26,7 +26,7 @@ series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 * 缺少磁盘归档文件 Compact 操作（有空的话会实现）
 * 没有 WAL 作为灾备保证高可用（心情好的话会实现）
 
-mandodb 主要受到了两个项目的启发，本项目仅限于学习用途，未经生产环境测试验证。
+mandodb 主要受到了两个项目的启发，**本项目仅限于学习用途，未经生产环境测试验证**。
 
 * [nakabonne/tstorage](https://github.com/nakabonne/tstorage)
 * [prometheus/prometheus](https://github.com/prometheus/prometheus)
@@ -1126,23 +1126,23 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 **Q: Is mandodb cool?**
 
-A: Not sure
+A: 🤭 Not sure.
 
 **Q: Is mando awesome?**
 
-A: Definitely YES!
+A: 😎 Definitely YES!
 
 **Q: PRs or Issues?**
 
-A: are welcome 😉...
+A: 😉 are welcome.
 
 **Q: What's the hardest part of this project？**
 
-A: Writing this document 😂...
+A: 😂 Writing this document.
 
 **Q：Anything else?**
 
-***Life is magic. Coding is art. 🍻 Bilibili!***
+A: ***🍻 Life is magic. Coding is art. Bilibili!***
 
 ![bilibili](./images/bilibili.png)
 
