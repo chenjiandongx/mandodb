@@ -4,7 +4,7 @@
 
 时序数据库（TSDB: Time Series Database）大多数时候都是为了满足监控场景的需求，这里先介绍两个概念：
 * 数据点（Point）: 时序数据的数据点是一个包含 (Timestamp:int64, Value:float64) 的二元组。
-* 时间线（Series）：不同标签（Label）的组合称为不同的时间线，如 
+* 时间线（Series）: 不同标签（Label）的组合称为不同的时间线，如 
 ```shell
 series1: {"__name__": "netspeed", "host": "localhost", "iface": "eth0"}
 series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
@@ -20,13 +20,13 @@ series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 
 **What's mandodb?**
 
-[mandodb](https://github.com/chenjiandongx/mandodb) 是我在学习的过程中实现的一个最小化的 TSDB，从概念上来讲它甚至还算不上是一个 TSDB，因为它：
+[mandodb](https://github.com/chenjiandongx/mandodb) 是我在学习过程中实现的一个最小化的 TSDB，从概念上来讲它还算不上是一个完整的 TSDB，因为它：
 
 * 没有实现自己的查询引擎（实现难度大）
 * 缺少磁盘归档文件 Compact 操作（有空的话会实现）
 * 没有 WAL 作为灾备保证高可用（心情好的话会实现）
 
-mandodb 主要受到了两个项目的启发，**本项目仅限于学习用途，未经生产环境测试验证**。
+mandodb 主要受到了两个项目的启发。**本项目仅限于学习用途，未经生产环境测试验证！**
 
 * [nakabonne/tstorage](https://github.com/nakabonne/tstorage)
 * [prometheus/prometheus](https://github.com/prometheus/prometheus)
@@ -36,11 +36,11 @@ prometheus 的核心开发者 Fabian Reinartz 写了一篇文章 [《Writing a T
 ## 📖 TOC
 
 * **💡 数据模型 & API**
-* **🛠 配置项**
+* **🛠 配置选项**
 * **🔖 用法示例**
 * **🧮 Gorilla 差值算法**
 * **📝 数据写入**
-* **🖇 mmap 内存映射**
+* **🖇 Mmap 内存映射**
 * **📍 索引设计**
 * **🗂 存储布局**
 * **❓ FAQ**
@@ -97,7 +97,7 @@ QuerySeries(lms LabelMatcherSet, start, end int64) ([]map[string]string, error)
 QueryLabelValues(label string, start, end int64) []string
 ```
 
-## 🛠 配置项
+## 🛠 配置选项
 
 配置项在初始化 TSDB 的时候设置。
 
@@ -139,7 +139,7 @@ WithWriteTimeout(t time.Duration) Option
 
 // WithLoggerConfig 设置日志配置项
 // logger: github.com/chenjiandongx/logger
-func WithLoggerConfig(opt *logger.Options) Option
+WithLoggerConfig(opt *logger.Options) Option
 ```
 
 ## 🔖 用法示例
@@ -208,7 +208,7 @@ func main() {
 }
 ```
 
-下面我把这段时间学习的内容进行了整理，尝试完整介绍如何从零开始实现一个小型的 TSDB。
+下面是我对这段时间学习内容的整理，尝试完整介绍如何从零开始实现一个小型的 TSDB。
 
 <p align="center"><image src="./images/教我做事.png" width="320px"></p>
 
@@ -246,7 +246,7 @@ t1: 1627401800; dod1: 0; dod2: 0; dod3: 0;
 
 当两个数据点数值值比较接近的话，通过异或操作计算出来的结果是比较相似的，利用这点就可以通过记录前置零和后置零个数以及数值部分来达到压缩空间的目的。
 
-下面通过算法具体实现来介绍一下，代码来自项目 [dgryski/go-tsz](https://github.com/dgryski/go-tsz)。代码完全按照论文中给出的步骤来实现。
+下面通过算法实现来介绍，代码来自项目 [dgryski/go-tsz](https://github.com/dgryski/go-tsz)。代码完全按照论文中给出的步骤来实现。
 
 ```golang
 // New 初始化 block 这里会将第一个原始时间戳写入到 block 中
@@ -422,7 +422,7 @@ series
     <-------------------- time --------------------->
 ```
 
-时序数据有很强的时间特性（这不是废话吗 🧐），即大多数查询其实只会查询**最近时刻**的数据，这里的「最近」是个相对概念。所以没必要维护一条时间线的完整生命周期，特别是在 Kubernetes 这种云原生场景，Pod 随时有可能会被扩缩容，也就意味着一条时间线的生命周期可能会很短。如果我们一直记录着所有的时间线，那么随着时间的推移，数据库里的时间线的数量会呈现一个线性增长的趋势 😱，会极大地影响查询效率。
+时序数据跟时间是强相关的（不然还叫时序数据？🧐），即大多数查询其实只会查询**最近时刻**的数据，这里的「最近」是个相对概念。所以没必要维护一条时间线的完整生命周期，特别是在 Kubernetes 这种云原生场景，Pod 随时有可能会被扩缩容，也就意味着一条时间线的生命周期可能会很短。如果我们一直记录着所有的时间线的索引信息，那么随着时间的推移，数据库里的时间线的数量会呈现一个线性增长的趋势 😱，会极大地影响查询效率。
 
 这里引入一个概念「序列分流」，这个概念描述的是一组时间序列变得不活跃，即不再接收数据点，取而代之的是有一组新的活跃的序列出现的场景。
 
@@ -503,7 +503,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 
 写入的时候支持数据时间回拨，也就是支持**有限的**乱序数据写入，实现方案是在内存中对还没归档的每条时间线维护一个链表（同样使用 AVL Tree 实现），当数据点的时间戳不是递增的时候存储到链表中，查询的时候会将两部分数据合并查询，持久化的时候也会将两者合并写入。
 
-## 🖇 mmap 内存映射
+## 🖇 Mmap 内存映射
 
 > [mmap](https://www.cnblogs.com/fnlingnzb-learner/p/6955591.html) 是一种将磁盘文件映射到进程的虚拟地址空间来实现对文件读取和修改操作的技术。
 
@@ -539,7 +539,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 
 <p align="center"><image src="./images/理解成功.png" width="320px"></p>
 
-😅 总而言之，常规文件操作需要从磁盘到页缓存再到用户主存的两次数据拷贝。而 mmap 操控文件，只需要从磁盘到用户主存的一次数据拷贝过程。mmap 的关键点是实现了「用户空间」和「内核空间」的数据直接交互而省去了不同空间数据复制的开销。
+😅 总而言之，常规文件操作需要从磁盘到页缓存再到用户主存的两次数据拷贝。而 mmap 操控文件只需要从磁盘到用户主存的一次数据拷贝过程。**mmap 的关键点是实现了「用户空间」和「内核空间」的数据直接交互而省去了不同空间数据复制的开销**。
 
 ## 📍 索引设计
 
@@ -570,7 +570,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 
 <p align="center"><image src="./images/窃窃自喜.png" width="320px"></p>
 
-不对，有问题 😨，要定位到其中的某条时间线，是不是得全表扫描一趟。而且这种设计还有另外一个弊病，就是会导致内存激增，Label 的 Name 和 Value 都可能是特别长的字符串。
+不对，有问题 😨，要定位到其中的某条时间线，那我是不是得全表扫描一趟。而且这种设计还有另外一个弊病，就是会导致内存激增，Label 的 Name 和 Value 都可能是特别长的字符串。
 
 那怎么办呢（🤡 靓仔沉默...），刹那间我的脑中闪过一个帅气的身影，没错，就是你，**花泽类**「只要倒立眼泪就不会流出来」。
 
@@ -1119,8 +1119,6 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 ```
 
 至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
-
-<p align="center"><image src="./images/深度理解.png" width="320px"></p>
 
 ## ❓ FAQ
 
