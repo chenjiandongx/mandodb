@@ -43,7 +43,6 @@ prometheus 的核心开发者 Fabian Reinartz 写了一篇文章 [《Writing a T
 * **🖇 mmap 内存映射**
 * **📍 索引设计**
 * **🗂 存储布局**
-* **🚥 代码测试**
 * **❓ FAQ**
 
 ## 💡 数据模型 & API 文档
@@ -395,6 +394,8 @@ Timestamp buckets 中，前后两个时间戳差值相同的比例高达 96.39%�
 ***Figure: 压缩率曲线***
 
 <p align="center"><image src="./images/compression-window.png" width="600px"></p>
+
+Gorilla 差值算法也应用于我的另外一个项目 [chenjiandongx/tszlist](https://github.com/chenjiandongx/tszlist)，一种时序数据线程安全链表。
 
 ## 📝 数据写入
 
@@ -903,12 +904,10 @@ seg-1627738753-1627746013
 func main() {
 	store := mandodb.OpenTSDB(mandodb.WithMetaBytesCompressorType(mandodb.ZstdBytesCompressor))
 	defer store.Close()
-    
-    // ...
+	// ...
 }
 
 // 压缩效果 28M -> 25M
-
 ❯ 🐶 ll seg-1627711905-1627719165
 Permissions Size User          Date Modified Name
 .rwxr-xr-x   25M chenjiandongx  1 Aug 00:13  data
@@ -920,12 +919,10 @@ Permissions Size User          Date Modified Name
 func main() {
 	store := mandodb.OpenTSDB(mandodb.WithMetaBytesCompressorType(mandodb.SnappyBytesCompressor))
 	defer store.Close()
-    
-    // ...
+	// ...
 }
 
 // 压缩效果 28M -> 26M
-
 ❯ 🐶 ll seg-1627763918-1627771178
 Permissions Size User          Date Modified Name
 .rwxr-xr-x   26M chenjiandongx  1 Aug 14:39  data
@@ -1120,8 +1117,6 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
 
 <p align="center"><image src="./images/深度理解.png" width="320px"></p>
-
-## 🚥 代码测试
 
 ## ❓ FAQ
 

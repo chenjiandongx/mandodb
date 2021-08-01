@@ -262,7 +262,6 @@ func (ms *memorySegment) Marshal() ([]byte, []byte, error) {
 }
 
 func mkdir(d string) {
-	d = path.Join(globalOpts.dataPath, d)
 	if _, err := os.Stat(d); !os.IsNotExist(err) {
 		return
 	}

@@ -403,7 +403,7 @@ func (tsdb *TSDB) loadFiles() {
 			return nil
 		}
 
-		files, err := ioutil.ReadDir(info.Name())
+		files, err := ioutil.ReadDir(filepath.Join(globalOpts.dataPath, info.Name()))
 		if err != nil {
 			return fmt.Errorf("failed to load data storage, err: %v", err)
 		}
@@ -411,7 +411,7 @@ func (tsdb *TSDB) loadFiles() {
 		diskseg := &diskSegment{}
 
 		for _, file := range files {
-			fn := filepath.Join(info.Name(), file.Name())
+			fn := filepath.Join(globalOpts.dataPath, info.Name(), file.Name())
 
 			if file.Name() == "data" {
 				mf, err := mmap.OpenMmapFile(fn)
