@@ -43,7 +43,8 @@ prometheus 的核心开发者 Fabian Reinartz 写了一篇文章 [《Writing a T
 * **🖇 mmap 内存映射**
 * **📍 索引设计**
 * **🗂 存储布局**
-* **📋 代码测试**
+* **🚥 代码测试**
+* **❓ FAQ**
 
 ## 💡 数据模型 & API 文档
 
@@ -204,7 +205,7 @@ func main() {
 }
 ```
 
-这次我把这段时间学习的内容整理一下，尝试完整介绍如何从零开始实现一个小型的 TSDB。
+下面我把这段时间学习的内容进行了整理，尝试完整介绍如何从零开始实现一个小型的 TSDB。
 
 <p align="center"><image src="./images/教我做事.png" width="320px"></p>
 
@@ -218,9 +219,9 @@ Gorilla 论文 4.1 小节介绍了压缩算法，先整体看一下压缩方案�
 
 <p align="center"><image src="./images/gorilla.png" width="600px"></p>
 
-**Timestamp 压缩：**
+**Timestamp DOD 压缩：**
 
-在时序的场景中，每个时序点都有一个对应的 Timestamp，一条时序序列中相邻数据点的间隔是有规律可循的。一般来讲，监控数据的采集都是会以固定的时间间隔进行的，所以我们就可以用差值来记录时间间隔，更进一步，我们可以用差值的差值来记录以此来减少存储空间。
+在时序的场景中，每个时序点都有一个对应的 Timestamp，一条时序序列中相邻数据点的间隔是有规律可循的。一般来讲，监控数据的采集都是会以固定的时间间隔进行的，所以就可以用差值来记录时间间隔，更进一步，我们可以用差值的差值来记录以此来减少存储空间。
 
 ```golang
 t1: 1627401800; t2: 1627401810; t3: 1627401820; t4: 1627401830
@@ -234,13 +235,13 @@ t1: 1627401800; dod1: 0; dod2: 0; dod3: 0;
 
 实际环境中当然不可能每个间隔都这么均匀，由于网络延迟等其他原因，差值会有波动。
 
-**Value 压缩：**
+**Value XOR 压缩：**
 
 ***Figure: IEEE 浮点数以及 XOR 计算结果***
 
 <p align="center"><image src="./images/float64.png" width="600px"></p>
 
-当两个数据点数值值比较接近的话，通过异或操作计算出来的结果是比较相似的，利用这点我们就可以通过记录前置零和后置零个数以及数值部分来达到压缩空间的目的。
+当两个数据点数值值比较接近的话，通过异或操作计算出来的结果是比较相似的，利用这点就可以通过记录前置零和后置零个数以及数值部分来达到压缩空间的目的。
 
 下面通过算法具体实现来介绍一下，代码来自项目 [dgryski/go-tsz](https://github.com/dgryski/go-tsz)。代码完全按照论文中给出的步骤来实现。
 
@@ -418,7 +419,7 @@ series
 
 时序数据有很强的时间特性（这不是废话吗 🧐），即大多数查询其实只会查询**最近时刻**的数据，这里的「最近」是个相对概念。所以没必要维护一条时间线的完整生命周期，特别是在 Kubernetes 这种云原生场景，Pod 随时有可能会被扩缩容，也就意味着一条时间线的生命周期可能会很短。如果我们一直记录着所有的时间线，那么随着时间的推移，数据库里的时间线的数量会呈现一个线性增长的趋势 😱，会极大地影响查询效率。
 
-在 Gorilla 论文中也提出了一个概念「序列分流」，这个概念描述的是一组时间序列变得不活跃，即不再接收数据点，取而代之的是有一组新的活跃的序列出现的场景。
+这里引入一个概念「序列分流」，这个概念描述的是一组时间序列变得不活跃，即不再接收数据点，取而代之的是有一组新的活跃的序列出现的场景。
 
 ```golang
 series
@@ -438,7 +439,7 @@ series
     <-------------------- time --------------------->
 ```
 
-我们将多条时间线的数据按一定的时间跨度切割成多个小块，每个小块本质就是一个独立小型的数据库，这种做法另外一个优势是清除过期操作的时候非常方便，只要将整个块给删了就行 👻。内存中保留最近两个小时的热数据（Memory Segment），其余数据持久化到磁盘(Disk Segment)。
+我们将多条时间线的数据按一定的时间跨度切割成多个小块，每个小块本质就是一个独立小型的数据库，这种做法另外一个优势是清除过期操作的时候非常方便，只要将整个块给删了就行 👻（梭哈是一种智慧）。内存中保留最近两个小时的热数据（Memory Segment），其余数据持久化到磁盘(Disk Segment)。
 
 ***Figure: 序列分块***
 
@@ -491,6 +492,10 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 }
 ```
 
+***Figure: Memory Segment 两部分数据***
+
+<p align="center"><image src="./images/memory-segment.png" width="500px"></p>
+
 写入的时候支持数据时间回拨，也就是支持**有限的**乱序数据写入，实现方案是在内存中对还没归档的每条时间线维护一个链表（同样使用 AVL Tree 实现），当数据点的时间戳不是递增的时候存储到链表中，查询的时候会将两部分数据合并查询，持久化的时候也会将两者合并写入。
 
 ## 🖇 mmap 内存映射
@@ -533,7 +538,7 @@ mmap 内存映射的实现过程，总的来说可以分为三个阶段：
 
 ## 📍 索引设计
 
-**TSDB 的索引查询，是通过 Label 组合来锁定到具体的时间线。**
+**TSDB 的查询，是通过 Label 组合来锁定到具体的时间线进而确定分块偏移检索出数据。**
 
 * Sid(MetricHash/-/LabelHash) 是一个 Series 的唯一标识。
 * Label(Name/-/Value) => vm="node1"; vm="node2"; iface="eth0"。
@@ -586,7 +591,77 @@ sid2; sid3; sid5
 
 假设我们的查询只支持**相等匹配**的话，格局明显就小了 🤌。查询条件是 `{vm=~"node*", iface="eth0"}` 肿么办？对 label1、label2、label3 和 label4 一起求一个并集吗？显然不是，因为这样算的话那结果就是 `sid3`。
 
-厘清关系就不难看出，**只要对相同的 LabelName 做并集然后再对不同的 LabelName 做交集就可以了**。这样算的正确结果就是 `sid3` 和 `sid5`。实现的时候用到了 Roaring Bitmap，一种优化的位图算法。
+厘清关系就不难看出，**只要对相同的 Label Name 做并集然后再对不同的 Label Name 求交集就可以了**。这样算的正确结果就是 `sid3` 和 `sid5`。实现的时候用到了 Roaring Bitmap，一种优化的位图算法。
+
+**Memory Segment 索引匹配**
+```golang
+func (mim *memoryIndexMap) MatchSids(lvs *labelValueSet, lms LabelMatcherSet) []string {
+	// ...
+	sids := newMemorySidSet()
+	var got bool
+	for i := len(lms) - 1; i >= 0; i-- {
+		tmp := newMemorySidSet()
+		vs := lvs.Match(lms[i])
+		// 对相同的 Label Name 求并集
+		for _, v := range vs {
+			midx := mim.idx[joinSeparator(lms[i].Name, v)]
+			if midx == nil || midx.Size() <= 0 {
+				continue
+			}
+
+			tmp.Union(midx.Copy())
+		}
+
+		if tmp == nil || tmp.Size() <= 0 {
+			return nil
+		}
+
+		if !got {
+			sids = tmp
+			got = true
+			continue
+		}
+
+		// 对不同的 Label Name 求交集
+		sids.Intersection(tmp.Copy())
+	}
+
+	return sids.List()
+}
+```
+
+**Disk Segment 索引匹配**
+```golang
+func (dim *diskIndexMap) MatchSids(lvs *labelValueSet, lms LabelMatcherSet) []uint32 {
+	// ...
+
+	lst := make([]*roaring.Bitmap, 0)
+	for i := len(lms) - 1; i >= 0; i-- {
+		tmp := make([]*roaring.Bitmap, 0)
+		vs := lvs.Match(lms[i])
+
+		// 对相同的 Label Name 求并集
+		for _, v := range vs {
+			didx := dim.label2sids[joinSeparator(lms[i].Name, v)]
+			if didx == nil || didx.set.IsEmpty() {
+				continue
+			}
+
+			tmp = append(tmp, didx.set)
+		}
+
+		union := roaring.ParOr(4, tmp...)
+		if union.IsEmpty() {
+			return nil
+		}
+
+		lst = append(lst, union)
+	}
+
+	// 对不同的 Label Name 求交集
+	return roaring.ParAnd(4, lst...).ToArray()
+}
+```
 
 然而，确定相同的 LabelName 也是一个问题，因为 Label 本身就代表着 `Name:Value`，难不成我还要遍历所有 label 才能确定嘛，这不就又成了全表扫描？？？
 
@@ -817,12 +892,13 @@ seg-1627738753-1627746013
 {__name__="cpu.busy", node="vm0", dc="0", foo="bdac463d-8805-4cbe-bc9a-9bf495f87bab", bar="3689df1d-cbf3-4962-abea-6491861e62d2", zoo="9551010d-9726-4b3b-baf3-77e50655b950"} 1627710454 41
 ```
 
-这样一条数据按照 JSON 格式进行网络通信的话，大概是 190Byte，初略计算一下。
+这样一条数据按照 JSON 格式进行网络通信的话，大概是 200Byte，初略计算一下。
 
- 190 * 9912336 = 1883343840Byte = 1796M
+200 * 9912336 = 1982467200Byte = 1890M
 
 可以选择 ZSTD 或者 Snappy 算法进行二次压缩（默认不开启）。还是上面的示例代码，不过在 TSDB 启动的时候指定了压缩算法。
 
+**ZstdBytesCompressor**
 ```golang
 func main() {
 	store := mandodb.OpenTSDB(mandodb.WithMetaBytesCompressorType(mandodb.ZstdBytesCompressor))
@@ -830,18 +906,33 @@ func main() {
     
     // ...
 }
-```
 
-再执行一遍程序来看看压缩效果。
+// 压缩效果 28M -> 25M
 
-```shell
 ❯ 🐶 ll seg-1627711905-1627719165
 Permissions Size User          Date Modified Name
 .rwxr-xr-x   25M chenjiandongx  1 Aug 00:13  data
 .rwxr-xr-x   110 chenjiandongx  1 Aug 00:13  meta.json
 ```
 
-体积变化 28M -> 25M。就这？？？
+**SnappyBytesCompressor**
+```golang
+func main() {
+	store := mandodb.OpenTSDB(mandodb.WithMetaBytesCompressorType(mandodb.SnappyBytesCompressor))
+	defer store.Close()
+    
+    // ...
+}
+
+// 压缩效果 28M -> 26M
+
+❯ 🐶 ll seg-1627763918-1627771178
+Permissions Size User          Date Modified Name
+.rwxr-xr-x   26M chenjiandongx  1 Aug 14:39  data
+.rwxr-xr-x   110 chenjiandongx  1 Aug 14:39  meta.json
+```
+
+多多少少还是有点效果的 🐶...
 
 <p align="center"><image src="./images/就这.png" width="320px"></p>
 
@@ -853,7 +944,7 @@ Permissions Size User          Date Modified Name
 
 <p align="center"><image src="./images/segment.png" width="380px"></p>
 
-TOC 描述了 Data Block 和 Meta Block（Series Block + Labels Block）的大小，用于后面对 data 进行解析读取。Data Block 存储了每条时间线具体的数据点，时间线之间数据紧挨存储。DataContent 就是使用 Gorilla 差值算法压缩的 block。
+TOC 描述了 Data Block 和 Meta Block（Series Block + Labels Block）的体积，用于后面对 data 进行解析读取。Data Block 存储了每条时间线具体的数据点，时间线之间数据紧挨存储。DataContent 就是使用 Gorilla 差值算法压缩的 block。
 
 ***Figure: Data Block***
 
@@ -878,11 +969,27 @@ Series Block 记录了每条时间线的元数据，字段解释如下。
 
 <p align="center"><image src="./images/series-block.png" width="620px"></p>
 
-了解完设计，再看看代码实现。
+了解完设计，再看看 Meta Block 编码和解编码的代码实现，binaryMetaSerializer 实现了 `MetaSerializer` 接口。
+
+```golang
+type MetaSerializer interface {
+	Marshal(Metadata) ([]byte, error)
+	Unmarshal([]byte, *Metadata) error
+}
+```
 
 **编码 Metadata**
 
 ```golang
+const (
+	endOfBlock uint16 = 0xffff
+	uint16Size        = 2
+	uint32Size        = 4
+	uint64Size        = 8
+
+	magic = "https://github.com/chenjiandongx/mandodb"
+)
+
 func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 	encf := newEncbuf()
 
@@ -920,7 +1027,7 @@ func (s *binaryMetaSerializer) Marshal(meta Metadata) ([]byte, error) {
 
 	encf.MarshalUint64(uint64(meta.MinTs))
 	encf.MarshalUint64(uint64(meta.MaxTs))
-	encf.MarshalString(magic)
+	encf.MarshalString(magic)   // <-- magic here
 
 	return ByteCompress(encf.Bytes()), nil
 }
@@ -945,11 +1052,11 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 		return ErrInvalidSize
 	}
 
+	// labels block
 	offset := 0
 	labels := make([]seriesWithLabel, 0)
 	for {
 		var labelName string
-
 		labelLen := decf.UnmarshalUint16(data[offset : offset+uint16Size])
 		offset += uint16Size
 
@@ -959,7 +1066,6 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 		labelName = decf.UnmarshalString(data[offset : offset+int(labelLen)])
 		offset += int(labelLen)
-
 		sidCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
 		offset += uint32Size
 
@@ -972,10 +1078,10 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 	}
 	meta.Labels = labels
 
+	// series block
 	rows := make([]metaSeries, 0)
 	for {
 		series := metaSeries{}
-
 		sidLen := decf.UnmarshalUint16(data[offset : offset+uint16Size])
 		offset += uint16Size
 
@@ -985,13 +1091,10 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 		series.Sid = decf.UnmarshalString(data[offset : offset+int(sidLen)])
 		offset += int(sidLen)
-
 		series.StartOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
-
 		series.EndOffset = decf.UnmarshalUint64(data[offset : offset+uint64Size])
 		offset += uint64Size
-
 		labelCnt := decf.UnmarshalUint32(data[offset : offset+uint32Size])
 		offset += uint32Size
 
@@ -1007,7 +1110,6 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 	meta.MinTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
-
 	meta.MaxTs = int64(decf.UnmarshalUint64(data[offset : offset+uint64Size]))
 	offset += uint64Size
 
@@ -1019,8 +1121,27 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 
 <p align="center"><image src="./images/深度理解.png" width="320px"></p>
 
-## 📋 代码测试
+## 🚥 代码测试
 
+## ❓ FAQ
+
+**Q: Is mandodb cool?**
+
+A: Not sure
+
+**Q: Is mando awesome?**
+
+A: Definitely YES!
+
+**Q: What's the hardest part of this project？**
+
+A: Writing this document 😂...
+
+**Q：Anything else?**
+
+***Life is magic. Coding is art. 🍻 Bilibili!***
+
+![bilibili](./images/bilibili.png)
 
 ## 📑 License
 
