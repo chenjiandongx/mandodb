@@ -1118,7 +1118,7 @@ func (s *binaryMetaSerializer) Unmarshal(data []byte, meta *Metadata) error {
 }
 ```
 
-至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。
+至此，对 mandodb 的索引和存储整体设计是不是就了然于胸。**🥺 文档较长，建议 Star 收藏，毕竟来都来了...**
 
 ## ❓ FAQ
 
@@ -1132,7 +1132,7 @@ A: 😎 Definitely YES!
 
 **Q: Write performance?**
 
-A: 🥺 ~40w/s
+A: 😯 ~40w/s
 
 **Q: PRs or Issues?**
 
