@@ -10,7 +10,7 @@ series1: {"__name__": "netspeed", "host": "localhost", "iface": "eth0"}
 series2: {"__name__": "netspeed", "host": "localhost", "iface": "eth1"}
 ```
 
-[Prometheus](https://prometheus.io/), [InfluxDB](https://www.influxdata.com/), [M3](https://m3db.io/), [TimescaleDB](https://www.timescale.com/) 都是时下流行的 TSDB。时序数据的压缩算法很大程度上决定了 TSDB 的性能，以上几个项目的实现都参考了 Fackbook 2015 年发表的论文[《Gorilla: A fast, scalable, in-memory time series database》](http://www.vldb.org/pvldb/vol8/p1816-teller.pdf) 中提到的差值算法，该算法平均可以将 16 字节的数据点压缩成 1.37 字节。
+[Prometheus](https://prometheus.io/), [InfluxDB](https://www.influxdata.com/), [M3](https://m3db.io/), [TimescaleDB](https://www.timescale.com/) 都是时下流行的 TSDB。时序数据的压缩算法很大程度上决定了 TSDB 的性能，以上几个项目的实现都参考了 Facebook 2015 年发表的论文[《Gorilla: A fast, scalable, in-memory time series database》](http://www.vldb.org/pvldb/vol8/p1816-teller.pdf) 中提到的差值算法，该算法平均可以将 16 字节的数据点压缩成 1.37 字节。
 
 **Who's mando?**
 
