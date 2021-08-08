@@ -2,6 +2,7 @@ package mandodb
 
 import (
 	"os"
+	"sync"
 
 	"github.com/chenjiandongx/mandodb/pkg/sortedlist"
 )
@@ -35,6 +36,7 @@ type Desc struct {
 }
 
 type segmentList struct {
+	mut  sync.Mutex
 	head Segment
 	lst  sortedlist.List
 }
@@ -44,6 +46,9 @@ func newSegmentList() *segmentList {
 }
 
 func (sl *segmentList) Get(start, end int64) []Segment {
+	sl.mut.Lock()
+	defer sl.mut.Unlock()
+
 	segs := make([]Segment, 0)
 
 	iter := sl.lst.All()
@@ -80,10 +85,16 @@ func (sl *segmentList) Choose(seg Segment, start, end int64) bool {
 }
 
 func (sl *segmentList) Add(segment Segment) {
+	sl.mut.Lock()
+	defer sl.mut.Unlock()
+
 	sl.lst.Add(segment.MinTs(), segment)
 }
 
 func (sl *segmentList) Remove(segment Segment) error {
+	sl.mut.Lock()
+	defer sl.mut.Unlock()
+
 	if err := segment.Close(); err != nil {
 		return err
 	}
@@ -93,6 +104,22 @@ func (sl *segmentList) Remove(segment Segment) error {
 	}
 
 	sl.lst.Remove(segment.MinTs())
+	return nil
+}
+
+func (sl *segmentList) Replace(pre, nxt Segment) error {
+	sl.mut.Lock()
+	defer sl.mut.Unlock()
+
+	if err := pre.Close(); err != nil {
+		return err
+	}
+
+	if err := pre.Cleanup(); err != nil {
+		return err
+	}
+
+	sl.lst.Add(pre.MinTs(), nxt)
 	return nil
 }
 

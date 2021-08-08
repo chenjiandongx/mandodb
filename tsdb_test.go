@@ -35,7 +35,7 @@ func genPoints(ts int64, node, dc int) []*Row {
 }
 
 func TestTSDB_QueryRange(t *testing.T) {
-	tmpdir := "/tmp/tsdb"
+	tmpdir := "/tmp/tsdb1"
 
 	store := OpenTSDB(WithDataPath(tmpdir), WithLoggerConfig(&logger.Options{
 		Stdout:      true,
@@ -90,7 +90,7 @@ func TestTSDB_QueryRange(t *testing.T) {
 }
 
 func TestTSDB_QuerySeries(t *testing.T) {
-	tmpdir := "/tmp/tsdb"
+	tmpdir := "/tmp/tsdb2"
 
 	store := OpenTSDB(WithDataPath(tmpdir))
 	defer store.Close()
@@ -121,7 +121,7 @@ func TestTSDB_QuerySeries(t *testing.T) {
 }
 
 func TestTSDB_QueryLabelValues(t *testing.T) {
-	tmpdir := "/tmp/tsdb"
+	tmpdir := "/tmp/tsdb3"
 
 	store := OpenTSDB(WithDataPath(tmpdir))
 	defer store.Close()
@@ -142,6 +142,6 @@ func TestTSDB_QueryLabelValues(t *testing.T) {
 
 	time.Sleep(time.Millisecond * 20)
 
-	ret := store.QueryLabelValues("idc", start, start+120)
-	assert.Equal(t, ret, []string{"0", "1", "2"})
+	ret := store.QueryLabelValues("node", start, start+120)
+	assert.Equal(t, ret, []string{"vm0", "vm1", "vm2"})
 }

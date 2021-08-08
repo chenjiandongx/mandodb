@@ -260,8 +260,7 @@ func (tsdb *TSDB) getHeadPartition() (Segment, error) {
 				return
 			}
 
-			tsdb.segs.Remove(head)
-			tsdb.segs.Add(newDiskSegment(mf, dn, head.MinTs(), head.MaxTs()))
+			tsdb.segs.Replace(head, newDiskSegment(mf, dn, head.MinTs(), head.MaxTs()))
 			logger.Infof("write file %s take: %v", fname, time.Since(t0))
 		}()
 
@@ -353,6 +352,7 @@ func (tsdb *TSDB) mergeQuerySeriesResult(ret ...LabelSet) []map[string]string {
 func (tsdb *TSDB) QueryLabelValues(label string, start, end int64) []string {
 	tmp := make(map[string]struct{})
 	for _, segment := range tsdb.segs.Get(start, end) {
+		segment = segment.Load()
 		values := segment.QueryLabelValues(label)
 		for i := 0; i < len(values); i++ {
 			tmp[values[i]] = struct{}{}
@@ -406,6 +406,7 @@ func (tsdb *TSDB) removeExpires() {
 }
 
 func (tsdb *TSDB) loadFiles() {
+	mkdir(globalOpts.dataPath)
 	err := filepath.Walk(globalOpts.dataPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return fmt.Errorf("failed to read the dir: %s, err: %v", path, err)
