@@ -2,6 +2,19 @@
 
 > 🤔 A minimize Time Series Database, written from scratch as a learning project.
 
+<a href="https://github.com/chenjiandongx/mandodb/pulls">
+    <img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat" alt="Contributions welcome">
+</a>
+<a href="https://goreportcard.com/report/github.com/chenjiandongx/mandodb">
+    <img src="https://goreportcard.com/badge/github.com/chenjiandongx/mandodb" alt="Go Report Card">
+</a>
+<a href="https://opensource.org/licenses/MIT">
+    <img src="https://img.shields.io/badge/License-MIT-brightgreen.svg" alt="MIT License">
+</a>
+<a href="https://pkg.go.dev/github.com/chenjiandongx/mandodb">
+    <img src="https://godoc.org/github.com/chenjiandongx/mandodb?status.svg" alt="GoDoc">
+ </a>
+
 时序数据库（TSDB: Time Series Database）大多数时候都是为了满足监控场景的需求，这里先介绍两个概念：
 * 数据点（Point）: 时序数据的数据点是一个包含 (Timestamp:int64, Value:float64) 的二元组。
 * 时间线（Series）: 不同标签（Label）的组合称为不同的时间线，如 
