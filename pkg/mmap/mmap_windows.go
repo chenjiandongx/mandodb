@@ -6,6 +6,8 @@ import (
 	"unsafe"
 )
 
+const maxMapSize = 0x7FFFFFFF // 2GB
+
 func syscallMmap(f *os.File, size int) ([]byte, error) {
 	low, high := uint32(size), uint32(size>>32)
 	h, errno := syscall.CreateFileMapping(syscall.Handle(f.Fd()), nil, syscall.PAGE_READONLY, high, low, nil)
