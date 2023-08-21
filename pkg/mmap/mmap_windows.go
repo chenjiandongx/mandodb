@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-const maxMapSize = 0x7FFFFFFF // 2GB
+const maxMapSize = 0xFFFFFFFFFFFF // 256TB
 
 func syscallMmap(f *os.File, size int) ([]byte, error) {
 	low, high := uint32(size), uint32(size>>32)
