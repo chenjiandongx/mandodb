@@ -44,7 +44,7 @@ mandodb 主要受到了两个项目的启发。**本项目仅限于学习用途�
 * [nakabonne/tstorage](https://github.com/nakabonne/tstorage)
 * [prometheus/prometheus](https://github.com/prometheus/prometheus)
 
-prometheus 的核心开发者 Fabian Reinartz 写了一篇文章 [《Writing a Time Series Database from Scratch》](https://fabxc.org/tsdb/) 来介绍 prometheus TSDB 的演变过程，非常值得一读，强烈推荐。
+prometheus 的核心开发者 Fabian Reinartz 写了一篇文章 [《Writing a Time Series Database from Scratch》](https://koktlzz.github.io/posts/writing-a-time-series-database-from-scratch/) 来介绍 prometheus TSDB 的演变过程，非常值得一读，强烈推荐。
 
 ## 📖 TOC
 
