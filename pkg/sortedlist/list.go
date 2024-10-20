@@ -290,7 +290,7 @@ func (t *avlNode) height() int {
 func appendValue(values []interface{}, lower, upper int64, t *avlNode) []interface{} {
 	if t != nil {
 		values = appendValue(values, lower, upper, t.left)
-		if t.key >= lower && t.key <= upper {
+		if t.key >= lower && t.key <= upper && t.value != nil {
 			values = append(values, t.value)
 		}
 		values = appendValue(values, lower, upper, t.right)
